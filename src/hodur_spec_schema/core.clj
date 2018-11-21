@@ -24,7 +24,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmulti ^:private get-spec-name
-  (fn [obj]
+  (fn [obj opts]
     (cond
       (and (-> obj :field/name)
            (-> obj :field/parent :type/union))
@@ -37,28 +37,29 @@
       :field)))
 
 (defn ^:private get-spec-entity-name
-  [type-name]
-  (keyword (str (ns-name *ns*))
+  [type-name {:keys [prefix] :or {prefix (str (ns-name *ns*))}}]
+  (keyword (name prefix)
            (->kebab-case-string type-name)))
 
 (defn ^:private get-spec-field-name
-  [type-name field-name]
-  (keyword (str (ns-name *ns*) "." (->kebab-case-string type-name))
+  [type-name field-name {:keys [prefix] :or {prefix (str (ns-name *ns*))}}]
+  (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (->kebab-case-string field-name)))
 
 (defmethod get-spec-name :entity
-  [{:keys [type/kebab-case-name]}]
-  (get-spec-entity-name (name kebab-case-name)))
+  [{:keys [type/kebab-case-name]} opts]
+  (get-spec-entity-name (name kebab-case-name) opts))
 
 (defmethod get-spec-name :field
   [{:keys [field/kebab-case-name
-           field/parent]}]
+           field/parent]} opts]
   (get-spec-field-name (name (:type/kebab-case-name parent))
-                       (name kebab-case-name)))
+                       (name kebab-case-name)
+                       opts))
 
 (defmethod get-spec-name :union-field
-  [{:keys [field/kebab-case-name]}]
-  (get-spec-entity-name (name kebab-case-name)))
+  [{:keys [field/kebab-case-name]} opts]
+  (get-spec-entity-name (name kebab-case-name) opts))
 
 
 #_(defmethod get-spec-name :default
@@ -70,7 +71,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmulti ^:private get-spec-form
-  (fn [obj]
+  (fn [obj opts]
     (cond
       (:type/enum obj)
       :enum
@@ -89,29 +90,29 @@
       (-> obj :field/type :type/name))))
 
 (defmethod get-spec-form :enum
-  [{:keys [field/_parent]}]
+  [{:keys [field/_parent]} opts]
   (list* `s/or
          (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
-                   (conj c kebab-case-name (get-spec-name field)))
+                   (conj c kebab-case-name (get-spec-name field opts)))
                  [] _parent)))
 
 (defmethod get-spec-form :union
-  [{:keys [field/_parent]}]
+  [{:keys [field/_parent]} opts]
   (list* `s/or
          (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
-                   (conj c kebab-case-name (get-spec-name field)))
+                   (conj c kebab-case-name (get-spec-name field opts)))
                  [] _parent)))
 
 (defmethod get-spec-form :enum-entry
-  [{:keys [field/name]}]
+  [{:keys [field/name]} _]
   `#(= ~name %))
 
 (defmethod get-spec-form :entity
-  [{:keys [field/_parent type/implements]}]
+  [{:keys [field/_parent type/implements]} opts]
   (let [filter-fn (fn [pred c]
                     (->> c
                          (filter pred)
-                         (map #(get-spec-name %))
+                         (map #(get-spec-name % opts))
                          vec))
         req (filter-fn #(not (:field/optional %)) _parent)
         opt (filter-fn #(:field/optional %) _parent)
@@ -119,48 +120,48 @@
     (if implements
       (list* `s/and
              (reduce (fn [c interface]
-                       (conj c (get-spec-name interface)))
+                       (conj c (get-spec-name interface opts)))
                      [form] implements))
       form)))
 
-(defmethod get-spec-form "String" [_] `string?)
+(defmethod get-spec-form "String" [_ _] `string?)
 
-(defmethod get-spec-form "ID" [_] `string?)
+(defmethod get-spec-form "ID" [_ _] `string?)
 
-(defmethod get-spec-form "Integer" [_] `integer?)
+(defmethod get-spec-form "Integer" [_ _] `integer?)
 
-(defmethod get-spec-form "Boolean" [_] `boolean?)
+(defmethod get-spec-form "Boolean" [_ _] `boolean?)
 
-(defmethod get-spec-form "Float" [_] `float?)
+(defmethod get-spec-form "Float" [_ _] `float?)
 
-(defmethod get-spec-form "DateTime" [_] `inst?)
+(defmethod get-spec-form "DateTime" [_ _] `inst?)
 
-(defmethod get-spec-form :default [obj]
+(defmethod get-spec-form :default [obj opts]
   (let [ref-type (-> obj :field/type)]
-    (get-spec-name ref-type)))
+    (get-spec-name ref-type opts)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn ^:private conj-field [coll field]
-  (conj coll (hash-map (get-spec-name field)
-                       (get-spec-form field))))
+(defn ^:private conj-field [coll field opts]
+  (conj coll (hash-map (get-spec-name field opts)
+                       (get-spec-form field opts))))
 
-(defn ^:private conj-type [coll {:keys [field/_parent] :as t}]
-  (let [type-spec (hash-map (get-spec-name t)
-                            (get-spec-form t))]
+(defn ^:private conj-type [coll {:keys [field/_parent] :as t} opts]
+  (let [type-spec (hash-map (get-spec-name t opts)
+                            (get-spec-form t opts))]
     (if (:type/union t)
       (conj coll type-spec)
       (let [conjd-fields (reduce (fn [c field]
-                                   (conj-field c field))
+                                   (conj-field c field opts))
                                  coll _parent)]
         (conj conjd-fields type-spec)))))
 
 (defn ^:private compile-types
-  [types]
+  [types opts]
   (->> types
        (reduce
         (fn [c t]
-          (conj-type c t))
+          (conj-type c t opts))
         [])
        (mapv (fn [entry]
                (let [k (first (keys entry))
@@ -173,9 +174,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn schema
-  [conn]
-  (let [types (get-types conn)]
-    (compile-types types)))
+  ([conn]
+   (schema conn nil))
+  ([conn opts]
+   (let [types (get-types conn)]
+     (compile-types types opts))))
+
+
 
 
 (require '[hodur-engine.core :as engine])
@@ -208,7 +213,7 @@
                  ^:union
                  SearchResult
                  [Person Pet]])
-      s (schema meta-db)]
+      s (schema meta-db {:prefix :my-app})]
   (clojure.pprint/pprint s))
 
 
