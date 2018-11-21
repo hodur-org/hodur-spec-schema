@@ -1,7 +1,8 @@
 (ns hodur-spec-schema.core
   (:require [clojure.spec.alpha :as s]
             [datascript.core :as d]
-            [datascript.query-v3 :as q]))
+            [datascript.query-v3 :as q]
+            [camel-snake-kebab.core :refer [->kebab-case-string]]))
 
 (defn ^:private get-types [conn]
   (let [selector '[* {:type/implements [*]
@@ -24,10 +25,6 @@
 
 (defmulti ^:private get-spec-name
   (fn [obj]
-    (println "AQUI ANTES")
-    (println (-> obj :field/name)
-             (-> obj :field/parent)
-             (-> obj :field/parent :type/union))
     (cond
       (and (-> obj :field/name)
            (-> obj :field/parent :type/union))
@@ -39,28 +36,36 @@
       (:field/name obj)
       :field)))
 
+(defn ^:private get-spec-entity-name
+  [type-name]
+  (keyword (str (ns-name *ns*))
+           (->kebab-case-string type-name)))
+
+(defn ^:private get-spec-field-name
+  [type-name field-name]
+  (keyword (str (ns-name *ns*) "." (->kebab-case-string type-name))
+           (->kebab-case-string field-name)))
+
 (defmethod get-spec-name :entity
   [{:keys [type/kebab-case-name]}]
-  (keyword (str (ns-name *ns*))
-           (name kebab-case-name)))
+  (get-spec-entity-name (name kebab-case-name)))
 
 (defmethod get-spec-name :field
   [{:keys [field/kebab-case-name
            field/parent]}]
-  (keyword (str (ns-name *ns*) "." (name (:type/kebab-case-name parent)))
-           (name kebab-case-name)))
+  (get-spec-field-name (name (:type/kebab-case-name parent))
+                       (name kebab-case-name)))
 
 (defmethod get-spec-name :union-field
   [{:keys [field/kebab-case-name]}]
-  (println "AQUI!!!")
-  (keyword (str (ns-name *ns*))
-           (name kebab-case-name)))
+  (get-spec-entity-name (name kebab-case-name)))
 
-(defmethod get-spec-name :default
-  [obj]
-  (println "FIXME!!!!")
-  (clojure.pprint/pprint obj)
-  nil)
+
+#_(defmethod get-spec-name :default
+    [obj]
+    (println "FIXME!!!!")
+    (clojure.pprint/pprint obj)
+    nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -74,10 +79,10 @@
       :union
       
       (and (:field/name obj)
-           (-> obj :field/parent :type/enum)) ;; is an enum-entry
+           (-> obj :field/parent :type/enum))
       :enum-entry
 
-      (:type/name obj) ;; is a basic entity
+      (:type/name obj)
       :entity
 
       (:field/name obj)
@@ -102,15 +107,21 @@
   `#(= ~name %))
 
 (defmethod get-spec-form :entity
-  [{:keys [field/_parent]}]
+  [{:keys [field/_parent type/implements]}]
   (let [filter-fn (fn [pred c]
                     (->> c
                          (filter pred)
                          (map #(get-spec-name %))
                          vec))
         req (filter-fn #(not (:field/optional %)) _parent)
-        opt (filter-fn #(:field/optional %) _parent)]
-    `(s/keys :req-un ~req :opt-un ~opt)))
+        opt (filter-fn #(:field/optional %) _parent)
+        form `(s/keys :req-un ~req :opt-un ~opt)]
+    (if implements
+      (list* `s/and
+             (reduce (fn [c interface]
+                       (conj c (get-spec-name interface)))
+                     [form] implements))
+      form)))
 
 (defmethod get-spec-form "String" [_] `string?)
 
@@ -125,8 +136,6 @@
 (defmethod get-spec-form "DateTime" [_] `inst?)
 
 (defmethod get-spec-form :default [obj]
-  (println "=====")
-  (clojure.pprint/pprint obj)
   (let [ref-type (-> obj :field/type)]
     (get-spec-name ref-type)))
 
@@ -187,9 +196,18 @@
                  Gender
                  [MALE FEMALE]
 
+                 ^{:implements Animal}
+                 Pet
+                 [^String name
+                  ^DateTime dob]
+
+                 ^:interface
+                 Animal
+                 [^String race]
+                 
                  ^:union
                  SearchResult
-                 [Person]])
+                 [Person Pet]])
       s (schema meta-db)]
   (clojure.pprint/pprint s))
 
