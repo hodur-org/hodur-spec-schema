@@ -24,9 +24,20 @@
 
 (defmulti ^:private get-spec-name
   (fn [obj]
+    (println "AQUI ANTES")
+    (println (-> obj :field/name)
+             (-> obj :field/parent)
+             (-> obj :field/parent :type/union))
     (cond
-      (:type/name obj) :entity
-      (:field/name obj) :field)))
+      (and (-> obj :field/name)
+           (-> obj :field/parent :type/union))
+      :union-field
+      
+      (:type/name obj)
+      :entity
+
+      (:field/name obj)
+      :field)))
 
 (defmethod get-spec-name :entity
   [{:keys [type/kebab-case-name]}]
@@ -39,6 +50,18 @@
   (keyword (str (ns-name *ns*) "." (name (:type/kebab-case-name parent)))
            (name kebab-case-name)))
 
+(defmethod get-spec-name :union-field
+  [{:keys [field/kebab-case-name]}]
+  (println "AQUI!!!")
+  (keyword (str (ns-name *ns*))
+           (name kebab-case-name)))
+
+(defmethod get-spec-name :default
+  [obj]
+  (println "FIXME!!!!")
+  (clojure.pprint/pprint obj)
+  nil)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmulti ^:private get-spec-form
@@ -47,11 +70,14 @@
       (:type/enum obj)
       :enum
 
+      (:type/union obj)
+      :union
+      
       (and (:field/name obj)
-           (-> obj :field/parent :type/enum))
+           (-> obj :field/parent :type/enum)) ;; is an enum-entry
       :enum-entry
 
-      (:type/name obj)
+      (:type/name obj) ;; is a basic entity
       :entity
 
       (:field/name obj)
@@ -59,7 +85,14 @@
 
 (defmethod get-spec-form :enum
   [{:keys [field/_parent]}]
-  (list* `(s/or)
+  (list* `s/or
+         (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
+                   (conj c kebab-case-name (get-spec-name field)))
+                 [] _parent)))
+
+(defmethod get-spec-form :union
+  [{:keys [field/_parent]}]
+  (list* `s/or
          (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
                    (conj c kebab-case-name (get-spec-name field)))
                  [] _parent)))
@@ -92,21 +125,26 @@
 (defmethod get-spec-form "DateTime" [_] `inst?)
 
 (defmethod get-spec-form :default [obj]
+  (println "=====")
+  (clojure.pprint/pprint obj)
   (let [ref-type (-> obj :field/type)]
     (get-spec-name ref-type)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-     (defn ^:private conj-field [coll field]
-       (conj coll (hash-map (get-spec-name field)
-                            (get-spec-form field))))
+(defn ^:private conj-field [coll field]
+  (conj coll (hash-map (get-spec-name field)
+                       (get-spec-form field))))
 
-     (defn ^:private conj-type [coll {:keys [field/_parent] :as t}]
-       (let [conjd-fields (reduce (fn [c field]
-                                    (conj-field c field))
-                                  coll _parent)]
-         (conj conjd-fields (hash-map (get-spec-name t)
-                                      (get-spec-form t)))))
+(defn ^:private conj-type [coll {:keys [field/_parent] :as t}]
+  (let [type-spec (hash-map (get-spec-name t)
+                            (get-spec-form t))]
+    (if (:type/union t)
+      (conj coll type-spec)
+      (let [conjd-fields (reduce (fn [c field]
+                                   (conj-field c field))
+                                 coll _parent)]
+        (conj conjd-fields type-spec)))))
 
 (defn ^:private compile-types
   [types]
@@ -118,6 +156,7 @@
        (mapv (fn [entry]
                (let [k (first (keys entry))
                      v (first (vals entry))]
+                 (println " - " k)
                  `(s/def ~k ~v))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -130,7 +169,7 @@
     (compile-types types)))
 
 
-     (require '[hodur-engine.core :as engine])
+(require '[hodur-engine.core :as engine])
 
 (let [meta-db (engine/init-schema
                '[^{:spec/tag true}
@@ -146,7 +185,11 @@
 
                  ^:enum
                  Gender
-                 [MALE FEMALE]])
+                 [MALE FEMALE]
+
+                 ^:union
+                 SearchResult
+                 [Person]])
       s (schema meta-db)]
   (clojure.pprint/pprint s))
 
@@ -166,6 +209,6 @@
   (s/explain :app/person
              {:first-name "Tiago"
               :last-name "Luchini"
-              :middle-name 'q})
+              :middle-name "2"})
 
   )
