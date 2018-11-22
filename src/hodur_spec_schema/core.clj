@@ -441,6 +441,20 @@
                     :spec/alias :my-param/alias}
                   an-aliased-param]]
 
+                ^{:spec/extend map?}
+                ExtendOverrideEntity
+                [^{:type String
+                   :spec/extend test-fns/email?}
+                 email-field
+                 ^{:type String
+                   :spec/override keyword?
+                   :spec/gen test-fns/keyword-gen}
+                 keyword-field
+                 [^{:type String
+                    :spec/override keyword?
+                    :spec/gen test-fns/keyword-gen}
+                  keyword-param]]
+
                 ]))
 
 (let [s (schema meta-db {:prefix :my-app})]
