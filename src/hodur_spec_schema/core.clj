@@ -87,7 +87,7 @@
 (defn ^:private get-spec-param-group-name
   [type-name field-name
    {:keys [prefix params-postfix] :or {prefix (default-prefix)
-                                       params-postfix "-params"} :as opts}]
+                                       params-postfix "%"} :as opts}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (str (->kebab-case-string field-name) params-postfix)))
 
@@ -281,9 +281,19 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn ^:private build-alias-spec [{:keys [spec/alias] :as obj} main-spec]
+  (when alias
+    (let [aliases (if (seqable? alias) alias [alias])]
+      (map #(hash-map % (first (keys main-spec)))
+           aliases))))
+
 (defn ^:private conj-param [coll param {:keys [conn] :as opts}]
-  (conj coll (hash-map (get-spec-name param opts)
-                       (get-spec-form param opts))))
+  (let [param-spec (hash-map (get-spec-name param opts)
+                             (get-spec-form param opts))
+        alias-spec (build-alias-spec param param-spec)]
+    (cond-> coll
+      alias-spec (into alias-spec)
+      :always    (conj param-spec))))
 
 (defn ^:private conj-field [coll {:keys [param/_parent] :as field} opts]
   (let [conjd-params (reduce (fn [c param]
@@ -293,20 +303,30 @@
                               (get-spec-form _parent opts))
         params-spec? (not (= {nil nil} params-spec))
         field-spec (hash-map (get-spec-name field opts)
-                             (get-spec-form field opts))]
+                             (get-spec-form field opts))
+        alias-spec (build-alias-spec field field-spec)]
     (cond-> conjd-params
       params-spec? (conj params-spec)
+      alias-spec   (into alias-spec)
       :always      (conj field-spec))))
 
 (defn ^:private conj-type [coll {:keys [field/_parent] :as t} opts]
   (let [type-spec (hash-map (get-spec-name t opts)
-                            (get-spec-form t opts))]
-    (if (:type/union t)
-      (conj coll type-spec)
-      (let [conjd-fields (reduce (fn [c field]
+                            (get-spec-form t opts))
+        alias-spec (build-alias-spec t type-spec)
+        conj-fields-fn (fn [inner-coll]
+                         (reduce (fn [c field]
                                    (conj-field c field opts))
-                                 coll _parent)]
-        (conj conjd-fields type-spec)))))
+                                 inner-coll _parent))]
+    (cond-> coll
+      (not (:type/union t))
+      conj-fields-fn
+
+      alias-spec
+      (into alias-spec)
+
+      :always
+      (conj type-spec))))
 
 (defn ^:private compile-types
   [types opts]
@@ -360,7 +380,8 @@
                 [^String name
                  ^DateTime dob]
 
-                ^:interface
+                ^{:interface true
+                  :spec/alias :beings/animal}
                 Animal
                 [^String race]
                 
@@ -409,6 +430,17 @@
                    :spec/distinct true
                    :spec/kind list?}
                  distinct-integers-in-a-list]
+
+                ^{:spec/alias :my-entity/alias}
+                AliasesEntity
+                [^{:type String
+                   :spec/alias [:my-field/alias1
+                                :my-field/alias2]}
+                 an-aliased-field
+                 [^{:type String
+                    :spec/alias :my-param/alias}
+                  an-aliased-param]]
+
                 ]))
 
 (let [s (schema meta-db {:prefix :my-app})]
