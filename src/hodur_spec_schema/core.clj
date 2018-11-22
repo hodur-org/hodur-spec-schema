@@ -49,9 +49,6 @@
            (-> obj :field/parent :type/union))
       :union-field
 
-      (= :primitive (:type/nature obj))
-      :primitive
-      
       (:type/name obj)
       :entity
       
@@ -108,15 +105,10 @@
                          param-name
                          opts)))
 
-(defmethod get-spec-name :primitive
-  [t opts]
-  (get-spec-form t opts))
-
-#_(defmethod get-spec-name :default
-    [obj]
-    (println "FIXME!!!!")
-    (clojure.pprint/pprint obj)
-    nil)
+(defmethod get-spec-name :default
+  [obj opts]
+  (throw (ex-info "Can't find a way to name the spec for object"
+                  {:obj obj})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -137,7 +129,10 @@
       :entity
 
       (:field/name obj)
-      (-> obj :field/type :type/name))))
+      (-> obj :field/type :type/name)
+
+      (:param/name obj)
+      (-> obj :param/type :type/name))))
 
 (defmethod get-spec-form :enum
   [{:keys [field/_parent]} opts]
@@ -187,15 +182,15 @@
 (defmethod get-spec-form "DateTime" [_ _] `inst?)
 
 (defmethod get-spec-form :default [obj opts]
-  (let [ref-type (-> obj :field/type)]
+  (let [ref-type (or (-> obj :field/type)
+                     (-> obj :param/type))]
     (get-spec-name ref-type opts)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^:private conj-param [coll param {:keys [conn] :as opts}]
-  (let [t (->> param :param/type :type/name (get-type-by-name conn))]
-    (conj coll (hash-map (get-spec-name param opts)
-                         (get-spec-name t opts)))))
+  (conj coll (hash-map (get-spec-name param opts)
+                       (get-spec-form param opts))))
 
 (defn ^:private conj-field [coll {:keys [param/_parent] :as field} opts]
   (let [conjd-params (reduce (fn [c param]
@@ -277,7 +272,20 @@
 
                 ^:enum
                 Unit
-                [METERS FEET]]))
+                [METERS FEET]
+
+                QueryRoot
+                [^{:type SearchResult
+                   :cardinality [0 n]}
+                 search
+                 [^String term
+                  ^{:type Integer
+                    :optional true}
+                  limit
+                  ^{:type Integer
+                    :optional true}
+                  offset]]
+                ]))
 
 (let [s (schema meta-db {:prefix :my-app})]
   (clojure.pprint/pprint s))
