@@ -133,9 +133,27 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn ^:private card-type [dep-obj]
+  (let [cardinality (or (:field/cardinality dep-obj)
+                        (:param/cardinality dep-obj))]
+    (when cardinality
+      (if (and (= 1 (first cardinality))
+               (= 1 (second cardinality)))
+        :one
+        :many))))
+
+(defn ^:private many-cardinality? [dep-obj]
+  (= :many (card-type dep-obj)))
+
+(defn ^:private one-cardinality? [dep-obj]
+  (= :one (card-type dep-obj)))
+
 (defmulti ^:private get-spec-form
   (fn [obj opts]
     (cond
+      (many-cardinality? obj)
+      :many-ref
+      
       (:type/enum obj)
       :enum
 
@@ -158,6 +176,14 @@
 
       (:param/name obj) ;; simple param, dispatch type name
       (-> obj :param/type :type/name))))
+
+(defmethod get-spec-form :many-ref
+  [obj opts]
+  `(s/coll-of ~(get-spec-form (dissoc obj :field/cardinality :param/cardinality) opts))
+  #_(list* `s/coll-of
+           (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
+                     (conj c kebab-case-name (get-spec-name field opts)))
+                   [] _parent)))
 
 (defmethod get-spec-form :enum
   [{:keys [field/_parent]} opts]
