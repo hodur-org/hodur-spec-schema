@@ -49,6 +49,10 @@
            (-> obj :field/parent :type/union))
       :union-field
 
+      (and (vector? obj)
+           (every? #(:param/name %) obj))
+      :param-group
+
       (:type/name obj)
       :entity
       
@@ -80,6 +84,13 @@
                 (->kebab-case-string field-name))
            (->kebab-case-string param-name)))
 
+(defn ^:private get-spec-param-group-name
+  [type-name field-name
+   {:keys [prefix params-postfix] :or {prefix (default-prefix)
+                                       params-postfix "-params"} :as opts}]
+  (keyword (str (name prefix) "." (->kebab-case-string type-name))
+           (str (->kebab-case-string field-name) params-postfix)))
+
 (defmethod get-spec-name :entity
   [{:keys [type/kebab-case-name]} opts]
   (get-spec-entity-name (name kebab-case-name) opts))
@@ -105,10 +116,20 @@
                          param-name
                          opts)))
 
+(defmethod get-spec-name :param-group
+  [params opts]
+  (let [type-name (-> params first :param/parent :field/parent :type/kebab-case-name)
+        field-name (-> params first :param/parent :field/kebab-case-name)]
+    (get-spec-param-group-name type-name
+                               field-name
+                               opts)))
+
 (defmethod get-spec-name :default
   [obj opts]
-  (throw (ex-info "Can't find a way to name the spec for object"
-                  {:obj obj})))
+  (if (nil? obj)
+    nil
+    (throw (ex-info "Unable to name a spec for object"
+                    {:obj obj}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -128,10 +149,14 @@
       (:type/name obj)
       :entity
 
-      (:field/name obj)
+      (and (vector? obj)
+           (every? #(:param/name %) obj))
+      :param-group
+
+      (:field/name obj) ;; simple field, dispatch type name
       (-> obj :field/type :type/name)
 
-      (:param/name obj)
+      (:param/name obj) ;; simple param, dispatch type name
       (-> obj :param/type :type/name))))
 
 (defmethod get-spec-form :enum
@@ -169,6 +194,17 @@
                      [form] implements))
       form)))
 
+(defmethod get-spec-form :param-group
+  [params opts]
+  (let [filter-fn (fn [pred c]
+                    (->> c
+                         (filter pred)
+                         (map #(get-spec-name % opts))
+                         vec))
+        req (filter-fn #(not (:param/optional %)) params)
+        opt (filter-fn #(:param/optional %) params)]
+    `(s/keys :req-un ~req :opt-un ~opt)))
+
 (defmethod get-spec-form "String" [_ _] `string?)
 
 (defmethod get-spec-form "ID" [_ _] `string?)
@@ -184,7 +220,7 @@
 (defmethod get-spec-form :default [obj opts]
   (let [ref-type (or (-> obj :field/type)
                      (-> obj :param/type))]
-    (get-spec-name ref-type opts)))
+    (when ref-type (get-spec-name ref-type opts))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -196,9 +232,14 @@
   (let [conjd-params (reduce (fn [c param]
                                (conj-param c param opts))
                              coll _parent)
+        params-spec (hash-map (get-spec-name _parent opts)
+                              (get-spec-form _parent opts))
+        params-spec? (not (= {nil nil} params-spec))
         field-spec (hash-map (get-spec-name field opts)
                              (get-spec-form field opts))]
-    (conj conjd-params field-spec)))
+    (cond-> conjd-params
+      params-spec? (conj params-spec)
+      :always      (conj field-spec))))
 
 (defn ^:private conj-type [coll {:keys [field/_parent] :as t} opts]
   (let [type-spec (hash-map (get-spec-name t opts)
