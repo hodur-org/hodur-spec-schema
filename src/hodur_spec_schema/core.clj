@@ -4,13 +4,17 @@
             [datascript.query-v3 :as q]
             [camel-snake-kebab.core :refer [->kebab-case-string]]))
 
+(def ^:private selector
+  '[* {:type/implements [*]
+       :field/_parent
+       [* {:param/_parent [* {:param/parent [* {:field/parent [*]}]}
+                           {:param/type [*]}]}
+        {:field/parent [*]}
+        {:field/type
+         [* {:field/_parent [*]}]}]}])
+
 (defn ^:private get-types [conn]
-  (let [selector '[* {:type/implements [*]
-                      :field/_parent
-                      [* {:field/parent [*]}
-                       {:field/type
-                        [* {:field/_parent [*]}]}]}]
-        eids (-> (q/q '[:find ?t
+  (let [eids (-> (q/q '[:find ?t
                         :where
                         [?t :type/name]
                         [?t :spec/tag true]
@@ -21,7 +25,22 @@
          (d/pull-many @conn selector)
          (sort-by :type/name))))
 
+(defn ^:private get-type-by-name [conn type-name]
+  (let [eids (-> (q/q '[:find ?t
+                        :in $ ?type-name
+                        :where
+                        [?t :type/name ?type-name]
+                        [?t :spec/tag true]
+                        [?t :type/nature :user]]
+                      @conn type-name)
+                 vec flatten)]
+    (->> eids
+         (d/pull-many @conn selector)
+         first)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(declare get-spec-form)
 
 (defmulti ^:private get-spec-name
   (fn [obj opts]
@@ -29,22 +48,40 @@
       (and (-> obj :field/name)
            (-> obj :field/parent :type/union))
       :union-field
+
+      (= :primitive (:type/nature obj))
+      :primitive
       
       (:type/name obj)
       :entity
-
+      
       (:field/name obj)
-      :field)))
+      :field
+
+      (:param/name obj)
+      :param)))
+
+(defn ^:private default-prefix []
+  (str (ns-name *ns*)))
 
 (defn ^:private get-spec-entity-name
-  [type-name {:keys [prefix] :or {prefix (str (ns-name *ns*))}}]
+  [type-name
+   {:keys [prefix] :or {prefix (default-prefix)}}]
   (keyword (name prefix)
            (->kebab-case-string type-name)))
 
 (defn ^:private get-spec-field-name
-  [type-name field-name {:keys [prefix] :or {prefix (str (ns-name *ns*))}}]
+  [type-name field-name
+   {:keys [prefix] :or {prefix (default-prefix)}}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (->kebab-case-string field-name)))
+
+(defn ^:private get-spec-param-name
+  [type-name field-name param-name
+   {:keys [prefix] :or {prefix (default-prefix)}}]
+  (keyword (str (name prefix) "." (->kebab-case-string type-name) "."
+                (->kebab-case-string field-name))
+           (->kebab-case-string param-name)))
 
 (defmethod get-spec-name :entity
   [{:keys [type/kebab-case-name]} opts]
@@ -61,6 +98,19 @@
   [{:keys [field/kebab-case-name]} opts]
   (get-spec-entity-name (name kebab-case-name) opts))
 
+(defmethod get-spec-name :param
+  [param opts]
+  (let [type-name (-> param :param/parent :field/parent :type/kebab-case-name)
+        field-name (-> param :param/parent :field/kebab-case-name)
+        param-name (-> param :param/kebab-case-name)]
+    (get-spec-param-name type-name
+                         field-name
+                         param-name
+                         opts)))
+
+(defmethod get-spec-name :primitive
+  [t opts]
+  (get-spec-form t opts))
 
 #_(defmethod get-spec-name :default
     [obj]
@@ -142,9 +192,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn ^:private conj-field [coll field opts]
-  (conj coll (hash-map (get-spec-name field opts)
-                       (get-spec-form field opts))))
+(defn ^:private conj-param [coll param {:keys [conn] :as opts}]
+  (let [t (->> param :param/type :type/name (get-type-by-name conn))]
+    (conj coll (hash-map (get-spec-name param opts)
+                         (get-spec-name t opts)))))
+
+(defn ^:private conj-field [coll {:keys [param/_parent] :as field} opts]
+  (let [conjd-params (reduce (fn [c param]
+                               (conj-param c param opts))
+                             coll _parent)
+        field-spec (hash-map (get-spec-name field opts)
+                             (get-spec-form field opts))]
+    (conj conjd-params field-spec)))
 
 (defn ^:private conj-type [coll {:keys [field/_parent] :as t} opts]
   (let [type-spec (hash-map (get-spec-name t opts)
@@ -166,7 +225,7 @@
        (mapv (fn [entry]
                (let [k (first (keys entry))
                      v (first (vals entry))]
-                 (println " - " k)
+                 (println " -" k)
                  `(s/def ~k ~v))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -178,42 +237,49 @@
    (schema conn nil))
   ([conn opts]
    (let [types (get-types conn)]
-     (compile-types types opts))))
+     (compile-types types (assoc opts :conn conn)))))
 
 
 
 
 (require '[hodur-engine.core :as engine])
 
-(let [meta-db (engine/init-schema
-               '[^{:spec/tag true}
-                 default
+(def meta-db (engine/init-schema
+              '[^{:spec/tag true}
+                default
 
-                 Person
-                 [^String first-name
-                  ^{:type String
-                    :optional true}
-                  middle-name
-                  ^String last-name
-                  ^Gender gender]
+                Person
+                [^String first-name
+                 ^{:type String
+                   :optional true}
+                 middle-name
+                 ^String last-name
+                 ^Gender gender
+                 ^Float height
+                 [^Unit unit]]
 
-                 ^:enum
-                 Gender
-                 [MALE FEMALE]
+                ^:enum
+                Gender
+                [MALE FEMALE]
 
-                 ^{:implements Animal}
-                 Pet
-                 [^String name
-                  ^DateTime dob]
+                ^{:implements Animal}
+                Pet
+                [^String name
+                 ^DateTime dob]
 
-                 ^:interface
-                 Animal
-                 [^String race]
-                 
-                 ^:union
-                 SearchResult
-                 [Person Pet]])
-      s (schema meta-db {:prefix :my-app})]
+                ^:interface
+                Animal
+                [^String race]
+                
+                ^:union
+                SearchResult
+                [Person Pet]
+
+                ^:enum
+                Unit
+                [METERS FEET]]))
+
+(let [s (schema meta-db {:prefix :my-app})]
   (clojure.pprint/pprint s))
 
 
