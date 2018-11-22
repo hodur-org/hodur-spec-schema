@@ -133,9 +133,12 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn ^:private get-cardinality [dep-obj]
+  (or (:field/cardinality dep-obj)
+      (:param/cardinality dep-obj)))
+
 (defn ^:private card-type [dep-obj]
-  (let [cardinality (or (:field/cardinality dep-obj)
-                        (:param/cardinality dep-obj))]
+  (let [cardinality (get-cardinality dep-obj)]
     (when cardinality
       (if (and (= 1 (first cardinality))
                (= 1 (second cardinality)))
@@ -177,13 +180,41 @@
       (:param/name obj) ;; simple param, dispatch type name
       (-> obj :param/type :type/name))))
 
+(defn ^:private get-counts [obj]
+  (let [many? (many-cardinality? obj)
+        card (get-cardinality obj)
+        from (first card)
+        to (second card)]
+    (when many?
+      (cond-> {}
+        (= from to)
+        (assoc :count from)
+
+        (and (not= from to)
+             (not= 'n from))
+        (assoc :min-count from)
+
+        (and (not= from to)
+             (not= 'n to))
+        (assoc :max-count to)))))
+
+(defn ^:private get-many-meta-specs [{:keys [spec/distinct spec/kind] :as obj}]
+  (let [kind' (if (and (not (nil? kind))
+                       (namespace kind))
+                kind (symbol "clojure.core" (str kind)))]
+    (cond-> {}
+      distinct (assoc :distinct distinct)
+      kind (assoc :kind kind'))))
+
 (defmethod get-spec-form :many-ref
   [obj opts]
-  `(s/coll-of ~(get-spec-form (dissoc obj :field/cardinality :param/cardinality) opts))
-  #_(list* `s/coll-of
-           (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
-                     (conj c kebab-case-name (get-spec-name field opts)))
-                   [] _parent)))
+  (let [entity-spec (get-spec-form (dissoc obj :field/cardinality :param/cardinality) opts)
+        other-nodes (merge (get-counts obj)
+                           (get-many-meta-specs obj))]
+    (list* `s/coll-of
+           (reduce-kv (fn [c k v]
+                        (conj c k v))
+                      [entity-spec] other-nodes))))
 
 (defmethod get-spec-form :enum
   [{:keys [field/_parent]} opts]
@@ -352,6 +383,32 @@
                   ^{:type Integer
                     :optional true}
                   offset]]
+
+                CardinalityEntity
+                [^{:type String
+                   :cardinality [0 n]}
+                 many-strings
+                 ^{:type Gender
+                   :cardinality [0 n]}
+                 many-genders
+                 ^{:type Person
+                   :cardinality [0 n]}
+                 many-people
+                 ^{:type Person
+                   :cardinality [3 5]}
+                 exactly-three-to-five-people
+                 ^{:type String
+                   :cardinality [4 4]}
+                 exactly-four-strings
+                 ^{:type Integer
+                   :cardinality [0 n]
+                   :spec/distinct true}
+                 distinct-integers
+                 ^{:type Integer
+                   :cardinality [0 n]
+                   :spec/distinct true
+                   :spec/kind list?}
+                 distinct-integers-in-a-list]
                 ]))
 
 (let [s (schema meta-db {:prefix :my-app})]
