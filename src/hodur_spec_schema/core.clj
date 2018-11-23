@@ -40,6 +40,14 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn ^:private prepend-core-ns [sym]
+  (when (not (nil? sym))
+    (if (namespace sym)
+      sym
+      (symbol "clojure.core" (str sym)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (declare get-spec-form)
 
 (defmulti ^:private get-spec-name
@@ -151,7 +159,7 @@
 (defn ^:private one-cardinality? [dep-obj]
   (= :one (card-type dep-obj)))
 
-(defmulti ^:private get-spec-form
+(defmulti ^:private get-spec-form*
   (fn [obj opts]
     (cond
       (many-cardinality? obj)
@@ -180,6 +188,20 @@
       (:param/name obj) ;; simple param, dispatch type name
       (-> obj :param/type :type/name))))
 
+(defn ^:private get-spec-form [{:keys [spec/override spec/extend spec/gen] :as obj} opts]
+  (let [override' (prepend-core-ns override)
+        extend' (prepend-core-ns extend)
+        gen' (prepend-core-ns gen)
+        base-form (get-spec-form* obj opts)
+        target-form (if override'
+                      override'
+                      (if extend'
+                        (list* `s/and [extend' base-form])
+                        base-form))]
+    (if gen'
+      (list* `s/with-gen [target-form gen'])
+      target-form)))
+
 (defn ^:private get-counts [obj]
   (let [many? (many-cardinality? obj)
         card (get-cardinality obj)
@@ -199,14 +221,12 @@
         (assoc :max-count to)))))
 
 (defn ^:private get-many-meta-specs [{:keys [spec/distinct spec/kind] :as obj}]
-  (let [kind' (if (and (not (nil? kind))
-                       (namespace kind))
-                kind (symbol "clojure.core" (str kind)))]
+  (let [kind' (prepend-core-ns kind)]
     (cond-> {}
       distinct (assoc :distinct distinct)
       kind (assoc :kind kind'))))
 
-(defmethod get-spec-form :many-ref
+(defmethod get-spec-form* :many-ref
   [obj opts]
   (let [entity-spec (get-spec-form (dissoc obj :field/cardinality :param/cardinality) opts)
         other-nodes (merge (get-counts obj)
@@ -216,25 +236,25 @@
                         (conj c k v))
                       [entity-spec] other-nodes))))
 
-(defmethod get-spec-form :enum
+(defmethod get-spec-form* :enum
   [{:keys [field/_parent]} opts]
   (list* `s/or
          (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
                    (conj c kebab-case-name (get-spec-name field opts)))
                  [] _parent)))
 
-(defmethod get-spec-form :union
+(defmethod get-spec-form* :union
   [{:keys [field/_parent]} opts]
   (list* `s/or
          (reduce (fn [c {:keys [field/kebab-case-name] :as field}]
                    (conj c kebab-case-name (get-spec-name field opts)))
                  [] _parent)))
 
-(defmethod get-spec-form :enum-entry
+(defmethod get-spec-form* :enum-entry
   [{:keys [field/name]} _]
   `#(= ~name %))
 
-(defmethod get-spec-form :entity
+(defmethod get-spec-form* :entity
   [{:keys [field/_parent type/implements]} opts]
   (let [filter-fn (fn [pred c]
                     (->> c
@@ -251,7 +271,7 @@
                      [form] implements))
       form)))
 
-(defmethod get-spec-form :param-group
+(defmethod get-spec-form* :param-group
   [params opts]
   (let [filter-fn (fn [pred c]
                     (->> c
@@ -262,19 +282,19 @@
         opt (filter-fn #(:param/optional %) params)]
     `(s/keys :req-un ~req :opt-un ~opt)))
 
-(defmethod get-spec-form "String" [_ _] `string?)
+(defmethod get-spec-form* "String" [_ _] `string?)
 
-(defmethod get-spec-form "ID" [_ _] `string?)
+(defmethod get-spec-form* "ID" [_ _] `string?)
 
-(defmethod get-spec-form "Integer" [_ _] `integer?)
+(defmethod get-spec-form* "Integer" [_ _] `integer?)
 
-(defmethod get-spec-form "Boolean" [_ _] `boolean?)
+(defmethod get-spec-form* "Boolean" [_ _] `boolean?)
 
-(defmethod get-spec-form "Float" [_ _] `float?)
+(defmethod get-spec-form* "Float" [_ _] `float?)
 
-(defmethod get-spec-form "DateTime" [_ _] `inst?)
+(defmethod get-spec-form* "DateTime" [_ _] `inst?)
 
-(defmethod get-spec-form :default [obj opts]
+(defmethod get-spec-form* :default [obj opts]
   (let [ref-type (or (-> obj :field/type)
                      (-> obj :param/type))]
     (when ref-type (get-spec-name ref-type opts))))
@@ -357,105 +377,125 @@
 
 (require '[hodur-engine.core :as engine])
 
-(def meta-db (engine/init-schema
-              '[^{:spec/tag true}
-                default
+(def basic-schema
+  '[^{:spec/tag true}
+    default
 
-                Person
-                [^String first-name
-                 ^{:type String
-                   :optional true}
-                 middle-name
-                 ^String last-name
-                 ^Gender gender
-                 ^Float height
-                 [^Unit unit]]
+    Person
+    [^String first-name
+     ^{:type String
+       :optional true}
+     middle-name
+     ^String last-name
+     ^Gender gender
+     ^Float height
+     [^Unit unit]]
 
-                ^:enum
-                Gender
-                [MALE FEMALE]
+    ^:enum
+    Gender
+    [MALE FEMALE]
 
-                ^{:implements Animal}
-                Pet
-                [^String name
-                 ^DateTime dob]
+    ^{:implements Animal}
+    Pet
+    [^String name
+     ^DateTime dob]
 
-                ^{:interface true
-                  :spec/alias :beings/animal}
-                Animal
-                [^String race]
-                
-                ^:union
-                SearchResult
-                [Person Pet]
+    ^{:interface true
+      :spec/alias :beings/animal}
+    Animal
+    [^String race]
+    
+    ^:union
+    SearchResult
+    [Person Pet]
 
-                ^:enum
-                Unit
-                [METERS FEET]
+    ^:enum
+    Unit
+    [METERS FEET]
 
-                QueryRoot
-                [^{:type SearchResult
-                   :cardinality [0 n]}
-                 search
-                 [^String term
-                  ^{:type Integer
-                    :optional true}
-                  limit
-                  ^{:type Integer
-                    :optional true}
-                  offset]]
+    QueryRoot
+    [^{:type SearchResult
+       :cardinality [0 n]}
+     search
+     [^String term
+      ^{:type Integer
+        :optional true}
+      limit
+      ^{:type Integer
+        :optional true}
+      offset]]])
 
-                CardinalityEntity
-                [^{:type String
-                   :cardinality [0 n]}
-                 many-strings
-                 ^{:type Gender
-                   :cardinality [0 n]}
-                 many-genders
-                 ^{:type Person
-                   :cardinality [0 n]}
-                 many-people
-                 ^{:type Person
-                   :cardinality [3 5]}
-                 exactly-three-to-five-people
-                 ^{:type String
-                   :cardinality [4 4]}
-                 exactly-four-strings
-                 ^{:type Integer
-                   :cardinality [0 n]
-                   :spec/distinct true}
-                 distinct-integers
-                 ^{:type Integer
-                   :cardinality [0 n]
-                   :spec/distinct true
-                   :spec/kind list?}
-                 distinct-integers-in-a-list]
+(def cardinality-schema
+  '[^{:spec/tag true}
+    default
 
-                ^{:spec/alias :my-entity/alias}
-                AliasesEntity
-                [^{:type String
-                   :spec/alias [:my-field/alias1
-                                :my-field/alias2]}
-                 an-aliased-field
-                 [^{:type String
-                    :spec/alias :my-param/alias}
-                  an-aliased-param]]
+    Person
+    [^String name
+     ^Gender gender]
+    
+    ^:enum
+    Gender
+    [MALE FEMALE]
 
-                ^{:spec/extend map?}
-                ExtendOverrideEntity
-                [^{:type String
-                   :spec/extend test-fns/email?}
-                 email-field
-                 ^{:type String
-                   :spec/override keyword?
-                   :spec/gen test-fns/keyword-gen}
-                 keyword-field
-                 [^{:type String
-                    :spec/override keyword?
-                    :spec/gen test-fns/keyword-gen}
-                  keyword-param]]
+    CardinalityEntity
+    [^{:type String
+       :cardinality [0 n]}
+     many-strings
+     ^{:type Gender
+       :cardinality [0 n]}
+     many-genders
+     ^{:type Person
+       :cardinality [0 n]}
+     many-people
+     ^{:type Person
+       :cardinality [3 5]}
+     exactly-three-to-five-people
+     ^{:type String
+       :cardinality [4 4]}
+     exactly-four-strings
+     ^{:type Integer
+       :cardinality [0 n]
+       :spec/distinct true}
+     distinct-integers
+     ^{:type Integer
+       :cardinality [0 n]
+       :spec/distinct true
+       :spec/kind list?}
+     distinct-integers-in-a-list]])
 
-                ]))
+(def aliases-schema
+  '[^{:spec/tag true}
+    default
+
+    ^{:spec/alias :my-entity/alias}
+    AliasesEntity
+    [^{:type String
+       :spec/alias [:my-field/alias1
+                    :my-field/alias2]}
+     an-aliased-field
+     [^{:type String
+        :spec/alias :my-param/alias}
+      an-aliased-param]]])
+
+(def extend-override-schema
+  '[^{:spec/tag true}
+    default
+
+    ^{:spec/extend map?}
+    ExtendOverrideEntity
+    [^{:type String
+       :spec/extend hodur-spec-schema.test-fns/email?}
+     email-field
+     ^{:type String
+       :spec/override keyword?
+       :spec/gen hodur-spec-schema.test-fns/keyword-gen}
+     keyword-field
+     [^{:type String
+        :spec/override keyword?
+        :spec/gen hodur-spec-schema.test-fns/keyword-gen}
+      keyword-param]]])
+
+(def meta-db (engine/init-schema extend-override-schema))
 
 (let [s (schema meta-db {:prefix :my-app})]
   (clojure.pprint/pprint s))
