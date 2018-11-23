@@ -358,7 +358,7 @@
        (mapv (fn [entry]
                (let [k (first (keys entry))
                      v (first (vals entry))]
-                 (println " -" k)
+                 #_(println " -" k)
                  `(s/def ~k ~v))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -372,6 +372,12 @@
    (let [types (get-types conn)]
      (compile-types types (assoc opts :conn conn)))))
 
+(defmacro defspecs
+  ([conn]
+   `(defspecs ~conn nil))
+  ([conn opts]
+   (mapv (fn [form] form)
+         (schema (eval conn) (eval opts)))))
 
 
 
@@ -401,7 +407,7 @@
      ^DateTime dob]
 
     ^{:interface true
-      :spec/alias :beings/animal}
+      #_:spec/alias #_:beings/animal}
     Animal
     [^String race]
     
@@ -495,7 +501,7 @@
         :spec/gen hodur-spec-schema.test-fns/keyword-gen}
       keyword-param]]])
 
-(def meta-db (engine/init-schema extend-override-schema))
+(def meta-db (engine/init-schema basic-schema #_extend-override-schema))
 
 (let [s (schema meta-db {:prefix :my-app})]
   (clojure.pprint/pprint s))
