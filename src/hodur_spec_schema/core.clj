@@ -158,12 +158,11 @@
           override' (prepend-core-ns override)
           extend' (prepend-core-ns extend)
           gen' (prepend-core-ns gen)
-          base-form (get-spec-form* obj opts)
           target-form (if override'
                         override'
                         (if extend'
-                          (list* `s/and [extend' base-form])
-                          base-form))]
+                          (list* `s/and [extend' (get-spec-form* obj opts)])
+                          (get-spec-form* obj opts)))]
       (if gen'
         (list* `s/with-gen [target-form gen'])
         target-form))
@@ -385,128 +384,136 @@
 
 
 
-(require '[hodur-engine.core :as engine])
 
-(def basic-schema
-  '[^{:spec/tag true}
-    default
 
-    Person
-    [^String first-name
-     ^{:type String
-       :optional true}
-     middle-name
-     ^String last-name
-     ^Gender gender
-     ^Float height
-     [^Unit unit]]
-
-    ^:enum
-    Gender
-    [MALE FEMALE]
-
-    ^{:implements Animal}
-    Pet
-    [^String name
-     ^DateTime dob]
-
-    ^{:interface true
-      :spec/alias :beings/animal}
-    Animal
-    [^String race]
-    
-    ^:union
-    SearchResult
-    [Person Pet]
-
-    ^:enum
-    Unit
-    [METERS FEET]
-
-    QueryRoot
-    [^{:type SearchResult
-       :cardinality [0 n]}
-     search
-     [^String term
-      ^{:type Integer
-        :optional true}
-      limit
-      ^{:type Integer
-        :optional true}
-      offset]]])
-
-(def cardinality-schema
-  '[^{:spec/tag true}
-    default
-
-    Person
-    [^String name
-     ^Gender gender]
-    
-    ^:enum
-    Gender
-    [MALE FEMALE]
-
-    CardinalityEntity
-    [^{:type String
-       :cardinality [0 n]}
-     many-strings
-     ^{:type Gender
-       :cardinality [0 n]}
-     many-genders
-     ^{:type Person
-       :cardinality [0 n]}
-     many-people
-     ^{:type Person
-       :cardinality [3 5]}
-     exactly-three-to-five-people
-     ^{:type String
-       :cardinality [4 4]}
-     exactly-four-strings
-     ^{:type Integer
-       :cardinality [0 n]
-       :spec/distinct true}
-     distinct-integers
-     ^{:type Integer
-       :cardinality [0 n]
-       :spec/distinct true
-       :spec/kind list?}
-     distinct-integers-in-a-list]])
-
-(def aliases-schema
-  '[^{:spec/tag true}
-    default
-
-    ^{:spec/alias :my-entity/alias}
-    AliasesEntity
-    [^{:type String
-       :spec/alias [:my-field/alias1
-                    :my-field/alias2]}
-     an-aliased-field
-     [^{:type String
-        :spec/alias :my-param/alias}
-      an-aliased-param]]])
-
-(def extend-override-schema
-  '[^{:spec/tag true}
-    default
-
-    ^{:spec/extend map?}
-    ExtendOverrideEntity
-    [^{:type String
-       :spec/extend hodur-spec-schema.test-fns/email?}
-     email-field
-     ^{:type String
-       :spec/override keyword?
-       :spec/gen hodur-spec-schema.test-fns/keyword-gen}
-     keyword-field
-     [^{:type String
-        :spec/override keyword?
-        :spec/gen hodur-spec-schema.test-fns/keyword-gen}
-      keyword-param]]])
 
 (comment
-  (def meta-db (engine/init-schema basic-schema #_extend-override-schema))
+  (require '[clojure.spec.gen.alpha :as gen])
+  (require '[hodur-engine.core :as engine])
+  (require 'test-fns)
+
+
+  (def basic-schema
+    '[^{:spec/tag true}
+      default
+
+      Person
+      [^String first-name
+       ^{:type String
+         :optional true}
+       middle-name
+       ^String last-name
+       ^Gender gender
+       ^Float height
+       [^Unit unit]]
+
+      ^:enum
+      Gender
+      [MALE FEMALE]
+
+      ^{:implements Animal}
+      Pet
+      [^String name
+       ^DateTime dob]
+
+      ^{:interface true
+        :spec/alias :beings/animal}
+      Animal
+      [^String race]
+      
+      ^:union
+      SearchResult
+      [Person Pet]
+
+      ^:enum
+      Unit
+      [METERS FEET]
+
+      QueryRoot
+      [^{:type SearchResult
+         :cardinality [0 n]}
+       search
+       [^String term
+        ^{:type Integer
+          :optional true}
+        limit
+        ^{:type Integer
+          :optional true}
+        offset]]])
+
+  (def cardinality-schema
+    '[^{:spec/tag true}
+      default
+
+      PersonTwo
+      [^String name
+       ^Gender gender]
+      
+      ^:enum
+      GenderTwo
+      [MALE FEMALE UNKOWN]
+
+      CardinalityEntity
+      [^{:type String
+         :cardinality [0 n]}
+       many-strings
+       ^{:type GenderTwo
+         :cardinality [0 n]}
+       many-genders
+       ^{:type PersonTwo
+         :cardinality [0 n]}
+       many-people
+       ^{:type PersonTwo
+         :cardinality [3 5]}
+       exactly-three-to-five-people
+       ^{:type String
+         :cardinality [4 4]}
+       exactly-four-strings
+       ^{:type Integer
+         :cardinality [0 n]
+         :spec/distinct true}
+       distinct-integers
+       ^{:type Integer
+         :cardinality [0 n]
+         :spec/distinct true
+         :spec/kind list?}
+       distinct-integers-in-a-list]])
+
+  (def aliases-schema
+    '[^{:spec/tag true}
+      default
+
+      ^{:spec/alias :my-entity/alias}
+      AliasesEntity
+      [^{:type String
+         :spec/alias [:my-field/alias1
+                      :my-field/alias2]}
+       an-aliased-field
+       [^{:type String
+          :spec/alias :my-param/alias}
+        an-aliased-param]]])
+
+  (def extend-override-schema
+    '[^{:spec/tag true}
+      default
+
+      ExtendOverrideEntity
+      [^{:type String
+         :spec/extend test-fns/email?
+         :spec/gen test-fns/email-gen}
+       email-field
+       ^{:spec/override keyword?
+         :spec/gen test-fns/keyword-gen}
+       keyword-field
+       [^{:spec/override keyword?
+          :spec/gen test-fns/keyword-gen}
+        keyword-param]]]))
+
+(comment
+  (def meta-db (engine/init-schema basic-schema
+                                   cardinality-schema
+                                   aliases-schema
+                                   extend-override-schema))
 
   (let [s (schema meta-db {:prefix :my-app})]
     (clojure.pprint/pprint s)))
@@ -519,7 +526,10 @@
 
   (count (schema meta-db {:prefix :my-app}))
   (count (filter #(or (clojure.string/starts-with? (namespace %) "my-app")
-                      (clojure.string/starts-with? (namespace %) "beings"))
+                      (clojure.string/starts-with? (namespace %) "beings")
+                      (clojure.string/starts-with? (namespace %) "my-entity")
+                      (clojure.string/starts-with? (namespace %) "my-field")
+                      (clojure.string/starts-with? (namespace %) "my-param"))
                  (keys (s/registry))))
   
   (s/valid? :my-app.person.height/unit "METERS")
@@ -529,8 +539,8 @@
   (s/valid? :my-app/person {:first-name "Tiago"
                             :last-name "Luchini"
                             :gender "MALE"
-                            :height 8.8})
-  
+                            :height 1.78})
+
   (s/valid? :my-app.query-root/search
             [{:name "Lexie"
               :dob #inst "2016-10-10"
@@ -538,23 +548,32 @@
              {:first-name "Tiago"
               :last-name "Luchini"
               :gender "MALE"
-              :height 8.8}])
+              :height 1.78}])
 
+  (s/valid? :my-app.cardinality-entity/many-strings [])
+  (s/valid? :my-app.cardinality-entity/many-strings ["foo" "bar"])
+  (s/valid? :my-app.cardinality-entity/many-genders ["MALE" "UNKOWN"])
+  (s/valid? :my-app.cardinality-entity/exactly-four-strings ["foo" "bar" "foo2" "bar2"])
+  (s/valid? :my-app.cardinality-entity/exactly-three-to-five-people
+            [{:name "Name" :gender "MALE"}
+             {:name "Name" :gender "MALE"}
+             {:name "Name" :gender "MALE"}])
+  (s/valid? :my-app.cardinality-entity/distinct-integers [1 2 3])
+  (s/valid? :my-app.cardinality-entity/distinct-integers-in-a-list '(1 2 3))
+
+  (s/valid? :my-param/alias "qwe")
+  (s/valid? :my-field/alias1 "qwe")
+  (s/valid? :my-field/alias2 "qwe")
+  (s/valid? :my-entity/alias {:an-aliased-field "qwe"})
+
+  (s/valid? :my-app.extend-override-entity/keyword-field :qwe)
+  (s/valid? :my-app.extend-override-entity/email-field "qwe@asd.com")
+
+  (gen/generate (s/gen :my-app/animal))
+
+  (gen/generate (s/gen :my-app.extend-override-entity/keyword-field))
+  (gen/generate (s/gen :my-app.extend-override-entity/email-field))
+
+  (gen/generate (s/gen :my-app/extend-override-entity))
   
-  (s/def :app.person/first-name string?)
-  (s/def :app.person/middle-name string?)
-  (s/def :app.person/last-name string?)
-  (s/def :app/person (s/keys :req-un [:app.person/first-name
-                                      :app.person/last-name]
-                             :opt-un [:app.person/middle-name]))
-
-  (s/valid? :app/person
-            {:first-nam "Tiago"
-             :last-name "Luchini"})
-
-  (s/explain :app/person
-             {:first-name "Tiago"
-              :last-name "Luchini"
-              :middle-name "2"})
-
   )
