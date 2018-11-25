@@ -2,43 +2,18 @@
   (:require [clojure.spec.alpha :as s]
             [datascript.core :as d]
             [datascript.query-v3 :as q]
-            [camel-snake-kebab.core :refer [->kebab-case-string]]))
+            [camel-snake-kebab.core :refer [->kebab-case-string]]
+            [hodur-engine.utils :as hodur-utils]))
 
-(def ^:private selector
-  '[* {:type/implements [*]
-       :field/_parent
-       [* {:param/_parent [* {:param/parent [* {:field/parent [*]}]}
-                           {:param/type [*]}]}
-        {:field/parent [*]}
-        {:field/type
-         [* {:field/_parent [*]}]}]}])
-
-(defn ^:private get-types [conn]
-  (let [eids (-> (q/q '[:find ?t
-                        :where
-                        [?t :type/name]
-                        [?t :spec/tag true]
-                        [?t :type/nature :user]]
-                      @conn)
-                 vec flatten)]
-    (->> eids
-         (d/pull-many @conn selector)
-         (sort-by :type/name))))
-
-(defn ^:private get-type-by-name [conn type-name]
-  (let [eids (-> (q/q '[:find ?t
-                        :in $ ?type-name
-                        :where
-                        [?t :type/name ?type-name]
-                        [?t :spec/tag true]
-                        [?t :type/nature :user]]
-                      @conn type-name)
-                 vec flatten)]
-    (->> eids
-         (d/pull-many @conn selector)
-         first)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn ^:private get-topo-ids [conn]
+  (hodur-utils/topological-sort conn
+                                {:direction {:type->field-children :rtl
+                                             :field->param-children :rtl
+                                             :type->field-return :ltr
+                                             :type->param-return :ltr
+                                             :interface->type :ltr
+                                             :union->type :ltr}
+                                 :tag :spec/tag}))
 
 (defn ^:private prepend-core-ns [sym]
   (when (not (nil? sym))
@@ -53,22 +28,12 @@
 (defmulti ^:private get-spec-name
   (fn [obj opts]
     (cond
-      (and (-> obj :field/name)
-           (-> obj :field/parent :type/union))
-      :union-field
-
-      (and (vector? obj)
-           (every? #(:param/name %) obj))
+      (and (seqable? obj)
+           (every? #(= :param (:node/type %)) obj))
       :param-group
 
-      (:type/name obj)
-      :entity
-      
-      (:field/name obj)
-      :field
-
-      (:param/name obj)
-      :param)))
+      :default
+      (:node/type obj))))
 
 (defn ^:private default-prefix []
   (str (ns-name *ns*)))
@@ -99,20 +64,16 @@
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (str (->kebab-case-string field-name) params-postfix)))
 
-(defmethod get-spec-name :entity
+(defmethod get-spec-name :type
   [{:keys [type/kebab-case-name]} opts]
   (get-spec-entity-name (name kebab-case-name) opts))
 
 (defmethod get-spec-name :field
   [{:keys [field/kebab-case-name
-           field/parent]} opts]
+           field/parent] :as field} opts]
   (get-spec-field-name (name (:type/kebab-case-name parent))
                        (name kebab-case-name)
                        opts))
-
-(defmethod get-spec-name :union-field
-  [{:keys [field/kebab-case-name]} opts]
-  (get-spec-entity-name (name kebab-case-name) opts))
 
 (defmethod get-spec-name :param
   [param opts]
@@ -175,11 +136,14 @@
            (-> obj :field/parent :type/enum))
       :enum-entry
 
+      (:field/union-type obj)
+      :union-field
+      
       (:type/name obj)
       :entity
 
-      (and (vector? obj)
-           (every? #(:param/name %) obj))
+      (and (seqable? obj)
+           (every? #(= :param (:node/type %)) obj))
       :param-group
 
       (:field/name obj) ;; simple field, dispatch type name
@@ -188,19 +152,22 @@
       (:param/name obj) ;; simple param, dispatch type name
       (-> obj :param/type :type/name))))
 
-(defn ^:private get-spec-form [{:keys [spec/override spec/extend spec/gen] :as obj} opts]
-  (let [override' (prepend-core-ns override)
-        extend' (prepend-core-ns extend)
-        gen' (prepend-core-ns gen)
-        base-form (get-spec-form* obj opts)
-        target-form (if override'
-                      override'
-                      (if extend'
-                        (list* `s/and [extend' base-form])
-                        base-form))]
-    (if gen'
-      (list* `s/with-gen [target-form gen'])
-      target-form)))
+(defn ^:private get-spec-form [obj opts]
+  (if (map? obj)
+    (let [{:keys [spec/override spec/extend spec/gen]} obj
+          override' (prepend-core-ns override)
+          extend' (prepend-core-ns extend)
+          gen' (prepend-core-ns gen)
+          base-form (get-spec-form* obj opts)
+          target-form (if override'
+                        override'
+                        (if extend'
+                          (list* `s/and [extend' base-form])
+                          base-form))]
+      (if gen'
+        (list* `s/with-gen [target-form gen'])
+        target-form))
+    (get-spec-form* obj opts)))
 
 (defn ^:private get-counts [obj]
   (let [many? (many-cardinality? obj)
@@ -254,6 +221,10 @@
   [{:keys [field/name]} _]
   `#(= ~name %))
 
+(defmethod get-spec-form* :union-field
+  [{:keys [field/union-type]} opts]
+  (get-spec-name union-type opts))
+
 (defmethod get-spec-form* :entity
   [{:keys [field/_parent type/implements]} opts]
   (let [filter-fn (fn [pred c]
@@ -297,69 +268,102 @@
 (defmethod get-spec-form* :default [obj opts]
   (let [ref-type (or (-> obj :field/type)
                      (-> obj :param/type))]
-    (when ref-type (get-spec-name ref-type opts))))
+    (if ref-type
+      (get-spec-name ref-type opts)
+      (throw (ex-info "Unable to create a spec form for object"
+                      {:obj obj})))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn ^:private build-alias-spec [{:keys [spec/alias] :as obj} main-spec]
-  (when alias
-    (let [aliases (if (seqable? alias) alias [alias])]
-      (map #(hash-map % (first (keys main-spec)))
-           aliases))))
+(defmulti ^:private pull-node
+  (fn [conn node]
+    (:node/type node)))
 
-(defn ^:private conj-param [coll param {:keys [conn] :as opts}]
-  (let [param-spec (hash-map (get-spec-name param opts)
-                             (get-spec-form param opts))
-        alias-spec (build-alias-spec param param-spec)]
-    (cond-> coll
-      alias-spec (into alias-spec)
-      :always    (conj param-spec))))
+(def ^:private param-selector
+  '[*
+    {:param/parent [*
+                    {:field/parent [*]}]}
+    {:param/type [*]}])
 
-(defn ^:private conj-field [coll {:keys [param/_parent] :as field} opts]
-  (let [conjd-params (reduce (fn [c param]
-                               (conj-param c param opts))
-                             coll _parent)
-        params-spec (hash-map (get-spec-name _parent opts)
-                              (get-spec-form _parent opts))
-        params-spec? (not (= {nil nil} params-spec))
-        field-spec (hash-map (get-spec-name field opts)
-                             (get-spec-form field opts))
-        alias-spec (build-alias-spec field field-spec)]
-    (cond-> conjd-params
-      params-spec? (conj params-spec)
-      alias-spec   (into alias-spec)
-      :always      (conj field-spec))))
+(def ^:private field-selector
+  `[~'*
+    {:param/_parent ~param-selector}
+    {:field/parent ~'[*]}
+    {:field/type ~'[*]}
+    {:field/union-type ~'[*]}])
 
-(defn ^:private conj-type [coll {:keys [field/_parent] :as t} opts]
-  (let [type-spec (hash-map (get-spec-name t opts)
-                            (get-spec-form t opts))
-        alias-spec (build-alias-spec t type-spec)
-        conj-fields-fn (fn [inner-coll]
-                         (reduce (fn [c field]
-                                   (conj-field c field opts))
-                                 inner-coll _parent))]
-    (cond-> coll
-      (not (:type/union t))
-      conj-fields-fn
+(def ^:private type-selector
+  `[~'* {:type/implements ~'[*]
+         :field/_parent ~field-selector}])
 
-      alias-spec
-      (into alias-spec)
+(defmethod pull-node :type
+  [conn {:keys [db/id]}]
+  (d/pull @conn type-selector id))
 
-      :always
-      (conj type-spec))))
+(defmethod pull-node :field
+  [conn {:keys [db/id]}]
+  (d/pull @conn field-selector id))
 
-(defn ^:private compile-types
-  [types opts]
-  (->> types
-       (reduce
-        (fn [c t]
-          (conj-type c t opts))
-        [])
-       (mapv (fn [entry]
-               (let [k (first (keys entry))
-                     v (first (vals entry))]
-                 #_(println " -" k)
-                 `(s/def ~k ~v))))))
+(defmethod pull-node :param
+  [conn {:keys [db/id]}]
+  (d/pull @conn param-selector id))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn ^:private build-aliases-spec [conn opts]
+  (let [eids (-> (q/q '[:find ?e
+                        :where
+                        (or [?e :spec/alias]
+                            [?e :spec/aliases])]
+                      @conn)
+                 vec flatten)
+        objs (d/pull-many @conn '[*] eids)]
+    (reduce (fn [c {:keys [spec/alias spec/aliases] :as obj}]
+              (let [aliases' (or aliases alias)
+                    aliases'' (if (seqable? aliases') aliases' [aliases'])
+                    node (pull-node conn obj)]
+                (into c (map #(hash-map % (get-spec-name node opts))
+                             aliases''))))
+            [] objs)))
+
+(defn ^:private build-param-group-specs [conn opts]
+  (let [eids (-> (q/q '[:find ?f
+                        :where
+                        [_ :param/parent ?f]]
+                      @conn)
+                 vec flatten)
+        objs (d/pull-many @conn '[{:param/_parent [*]}] eids)]
+    (reduce (fn [c {:keys [param/_parent] :as field}]
+              (let [nodes (map #(pull-node conn %) _parent)]
+                (conj c (hash-map (get-spec-name nodes opts)
+                                  (get-spec-form nodes opts)))))
+            [] objs)))
+
+(defn ^:private build-node-spec [conn node opts]
+  (-> conn
+      (pull-node node)
+      (#(hash-map (get-spec-name % opts)
+                  (get-spec-form % opts)))))
+
+(defn ^:private compile-all
+  [conn ids opts]
+  (let [aliases-specs      (build-aliases-spec conn opts)
+        param-groups-specs (build-param-group-specs conn opts)]
+    (->> ids
+         (d/pull-many @conn [:db/id :node/type])
+         (reduce
+          (fn [c node]
+            (conj c (build-node-spec conn node opts)))
+          [])
+         (#(into % aliases-specs))
+         (#(into % param-groups-specs))
+         (mapv (fn [entry]
+                 (let [k (first (keys entry))
+                       v (first (vals entry))]
+                   #_(do (println " - " k)
+                         (println " =>" v)
+                         (println " ")) 
+                   `(s/def ~k ~v)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Public functions
@@ -369,8 +373,8 @@
   ([conn]
    (schema conn nil))
   ([conn opts]
-   (let [types (get-types conn)]
-     (compile-types types (assoc opts :conn conn)))))
+   (let [all-ids (get-topo-ids conn)]
+     (compile-all conn all-ids opts))))
 
 (defmacro defspecs
   ([conn]
@@ -407,7 +411,7 @@
      ^DateTime dob]
 
     ^{:interface true
-      #_:spec/alias #_:beings/animal}
+      :spec/alias :beings/animal}
     Animal
     [^String race]
     
@@ -501,13 +505,42 @@
         :spec/gen hodur-spec-schema.test-fns/keyword-gen}
       keyword-param]]])
 
-(def meta-db (engine/init-schema basic-schema #_extend-override-schema))
+(comment
+  (def meta-db (engine/init-schema basic-schema #_extend-override-schema))
 
-(let [s (schema meta-db {:prefix :my-app})]
-  (clojure.pprint/pprint s))
+  (let [s (schema meta-db {:prefix :my-app})]
+    (clojure.pprint/pprint s)))
 
 
 (comment
+
+  (defspecs meta-db {:prefix :my-app})
+
+
+  (count (schema meta-db {:prefix :my-app}))
+  (count (filter #(or (clojure.string/starts-with? (namespace %) "my-app")
+                      (clojure.string/starts-with? (namespace %) "beings"))
+                 (keys (s/registry))))
+  
+  (s/valid? :my-app.person.height/unit "METERS")
+
+  (s/valid? :my-app/pet {:name "bla" :dob #inst "2000-10-10" :race "cat"})
+
+  (s/valid? :my-app/person {:first-name "Tiago"
+                            :last-name "Luchini"
+                            :gender "MALE"
+                            :height 8.8})
+  
+  (s/valid? :my-app.query-root/search
+            [{:name "Lexie"
+              :dob #inst "2016-10-10"
+              :race "Dog"}
+             {:first-name "Tiago"
+              :last-name "Luchini"
+              :gender "MALE"
+              :height 8.8}])
+
+  
   (s/def :app.person/first-name string?)
   (s/def :app.person/middle-name string?)
   (s/def :app.person/last-name string?)

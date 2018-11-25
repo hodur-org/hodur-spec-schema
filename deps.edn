@@ -2,7 +2,7 @@
 
  :deps
  {org.clojure/clojure {:mvn/version "1.9.0"}
-  hodur/engine        {:mvn/version "0.1.4"}
+  hodur/engine        {:local/root "../hodur-engine"} #_{:mvn/version "0.1.4"}
   camel-snake-kebab   {:mvn/version "0.4.0"}
   datascript          {:mvn/version "0.16.7"}}
 
