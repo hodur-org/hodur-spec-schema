@@ -1,0 +1,174 @@
+#+TITLE:   Hodur Spec Schema
+#+AUTHOR:  Tiago Luchini
+#+EMAIL:   info@tiagoluchini.eu
+#+OPTIONS: toc:t
+
+[[https://circleci.com/gh/luchiniatwork/hodur-spec-schema.svg?style=shield&circle-token=86a1a26155a45d7ec4aba873e975b15ce37d1f5a]]
+[[https://img.shields.io/clojars/v/hodur/engine.svg]]
+[[https://img.shields.io/clojars/v/hodur/spec-schema.svg]]
+[[https://img.shields.io/badge/license-MIT-blue.svg]]
+[[https://img.shields.io/badge/project%20status-beta-brightgreen.svg]]
+
+[[./docs/logo-tag-line.png]]
+
+Hodur is a descriptive domain modeling approach and related collection
+of libraries for Clojure.
+
+By using Hodur you can define your domain model as data, parse and
+validate it, and then either consume your model via an API making your
+apps respond to the defined model or use one of the many plugins to
+help you achieve mechanical, repetitive results faster and in a purely
+functional manner.
+
+#+BEGIN_QUOTE
+This Hodur plugin provides the ability to generate [[https://clojure.org/guides/spec][Clojure Spec]]
+schemas out of your Hodur model. You can then validate your data
+structures, generate random payloads, extend yours tests... you name
+it.
+#+END_QUOTE
+
+* Motivation
+
+  For a deeper insight into the motivations behind Hodur, check the
+  [[https://github.com/luchiniatwork/hodur-engine/blob/master/docs/MOTIVATION.org][motivation doc]].
+
+* Getting Started
+
+  Hodur has a highly modular architecture. [[https://github.com/luchiniatwork/hodur-engine][Hodur Engine]] is always
+  required as it provides the meta-database functions and APIs
+  consumed by plugins.
+
+  Therefore, refer the [[https://github.com/luchiniatwork/hodur-engine#getting-started][Hodur Engine's Getting Started]] first and then
+  return here for Spec-specific setup.
+
+  After having set up ~hodur-engine~ as described above, we also need
+  to add ~hodur/spec-schema~, a plugin that creates Spec Schemas
+  out of your model to the ~deps.edn~ file:
+
+#+BEGIN_SRC clojure
+  {:deps {hodur/engine      {:mvn/version "0.1.5"}
+          hodur/spec-schema {:mvn/version "0.1.0"}}}
+#+END_SRC
+
+  You should ~require~ it any way you see fit:
+
+#+BEGIN_SRC clojure
+  (require '[hodur-engine.core :as hodur])
+  (require '[hodur-spec-schema.core :as hodur-spec])
+#+END_SRC
+
+  Let's expand our ~Person~ model from the original getting started by
+  "tagging" the ~Person~ entity for Spec. You can read more about
+  the concept of tagging for plugins in the sessions below but, in
+  short, this is the way we, model designers, use to specify which
+  entities we want to be exposed to which plugins.
+
+#+BEGIN_SRC clojure
+  (def meta-db (hodur/init-schema
+                '[^{:spec/tag-recursive true}
+                  Person
+                  [^String first-name
+                   ^String last-name]]))
+#+END_SRC
+
+  The ~hodur-spec-schema~ plugin exposes a function called ~schema~
+  that returns a vector with all the spec definitions your model
+  needs:
+
+#+BEGIN_SRC clojure
+  (def spec-schema (hodur-spec/schema meta-db))
+#+END_SRC
+
+  When you inspect ~spec-schema~, this is what you have:
+
+#+BEGIN_SRC clojure
+  [(clojure.spec.alpha/def
+     :my-app.core.person/last-name
+     clojure.core/string?)
+   (clojure.spec.alpha/def
+     :my-app.core.person/first-name
+     clojure.core/string?)
+   (clojure.spec.alpha/def
+     :my-app.core/person
+     (clojure.spec.alpha/keys
+      :req-un
+      [:my-app.core.person/first-name
+       :my-app.core.person/last-name]
+      :opt-un
+      []))]
+#+END_SRC
+
+  As a convenience, ~hodur-spec-schema~ also provides a macro called
+  ~defspecs~ that already defines all your specs onto your registry:
+
+#+BEGIN_SRC clojure
+  (hodur-specs/defspecs meta-db)
+#+END_SRC
+
+  Once ~defspecs~ is run, you'll have three specs to use:
+
+  - ~:my-app.core.person/last-name~
+  - ~:my-app.core.person/first-name~
+  - ~:my-app.core/person~
+
+  Therefore, we can use spec normally like:
+
+#+BEGIN_SRC clojure
+  (require '[clojure.spec.alpha :as s])
+
+  (s/valid? :my-app.core/person {:first-name "Jane"
+                                 :last-name "Janet"}) ;; => true
+
+  (s/valid? :my-app.core/person {:firs-name "Jane"
+                                 :last-name "Janet"}) ;; => false
+#+END_SRC
+
+* Model Definition
+
+  All Hodur plugins follow the [[https://github.com/luchiniatwork/hodur-engine#model-definition][Model Definition]] as described on Hodur
+  [[https://github.com/luchiniatwork/hodur-engine#model-definition][Engine's documentation]].
+
+
+* Naming Conventions
+
+TBD
+
+* Aliases
+
+TBD
+
+* Primitive Types
+
+TBD
+
+* Cardinality
+
+TBD
+
+* Enums and Unions
+
+TBD
+
+* Overriding and Extending
+
+TBD
+
+* Custom Generators
+
+TBD
+
+* Bugs
+
+  If you find a bug, submit a [[https://github.com/luchiniatwork/hodur-spec-schema/issues][GitHub issue]].
+
+* Help!
+
+  This project is looking for team members who can help this project
+  succeed! If you are interested in becoming a team member please open
+  an issue.
+
+* License
+
+  Copyright © 2018 Tiago Luchini
+
+  Distributed under the MIT License (see [[./LICENSE][LICENSE]]).

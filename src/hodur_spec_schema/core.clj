@@ -541,6 +541,11 @@
                             :gender "MALE"
                             :height 1.78})
 
+  (s/explain :my-app/person {:first-name "Tiago"
+                             :last-name "Luchini"
+                             :gender "MALE"
+                             :height 1.78})
+
   (s/valid? :my-app.query-root/search
             [{:name "Lexie"
               :dob #inst "2016-10-10"
