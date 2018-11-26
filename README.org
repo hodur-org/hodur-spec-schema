@@ -7,7 +7,7 @@
 [[https://img.shields.io/clojars/v/hodur/engine.svg]]
 [[https://img.shields.io/clojars/v/hodur/spec-schema.svg]]
 [[https://img.shields.io/badge/license-MIT-blue.svg]]
-[[https://img.shields.io/badge/project%20status-beta-brightgreen.svg]]
+[[https://img.shields.io/badge/project%20status-alpha-brightgreen.svg]]
 
 [[./docs/logo-tag-line.png]]
 
@@ -131,31 +131,269 @@ it.
 
 * Naming Conventions
 
-TBD
+  For the sake of composability each of your entities, fields, and
+  parameters will have their own bespoke specs defined.
 
-* Aliases
+  The convention is that each spec will have a fully-qualified name in
+  the namespace where ~defspecs~ is called pretty much as if a ~::~
+  was used. Example:
 
-TBD
+#+BEGIN_SRC clojure
+  (ns my-app.core
+    (:require [clojure.spec.alpha :as s]
+              [hodur-engine.core :as hodur]
+              [hodur-spec-schema.core :as hodur-spec]))
+
+  (def meta-db (engine/init-schema
+                '[^{:spec/tag-recursive true}
+                  Person
+                  [^String first-name
+                   ^String last-name]]))
+
+  (hodur-spec/defspecs meta-db)
+  ;; => [:my-app.core.person/last-name
+  ;;     :my-app.core.person/first-name
+  ;;     :my-app.core/person]
+
+  (s/valid? :my-app.core/person {:first-name "Jane"
+                                 :last-name "Janet"}) ;; => true
+
+  (s/valid? :my-app.core/person {:firs-name "Jane"
+                                 :last-name "Janet"});; => false
+
+  (s/explain :my-app.core/person {:firs-name "Jane"
+                                  :last-name "Janet"})
+  ;; prints out:
+  ;; val: {:firs-name "Jane", :last-name "Janet"} fails spec: :hodur-spec-schema.core/person predicate: (contains? % :first-name)
+#+END_SRC
+
+* Influencing Names with Aliases and Prefix
+
+  Sometimes the default behavior of the naming convention above might
+  not suit you. There are two ways to affect the names.
+
+  The first one is to use ~:prefix~ on ~defspecs~. It will override
+  the default namespace altogether. Example:
+
+#+BEGIN_SRC clojure
+  (ns my-app.core
+    (:require [clojure.spec.alpha :as s]
+              [hodur-engine.core :as hodur]
+              [hodur-spec-schema.core :as hodur-spec]))
+
+  (def meta-db (engine/init-schema
+                '[^{:spec/tag-recursive true}
+                  Person
+                  [^String first-name
+                   ^String last-name]]))
+
+  (hodur-spec/defspecs meta-db {:prefix :app})
+  ;; => [:app.person/last-name
+  ;;     :app.person/first-name
+  ;;     :app/person]
+
+  (s/valid? :app/person {:first-name "Jane"
+                         :last-name "Janet"}) ;; => true
+#+END_SRC
+
+  The second method is to use the marker ~:spec/alias~ or
+  ~:spec/aliases~ when defining entities, fields or
+  parameters. Example:
+
+#+BEGIN_SRC clojure
+  (ns my-app.core
+    (:require [clojure.spec.alpha :as s]
+              [hodur-engine.core :as hodur]
+              [hodur-spec-schema.core :as hodur-spec]))
+
+  (def meta-db (engine/init-schema
+                '[^{:spec/tag-recursive true
+                    :spec/alias :la/persona}
+                  Person
+                  [^{:spec/aliases [:a-persons/first-name
+                                    :el/primo]}
+                   ^String first-name
+                   ^{:spec/aliases [:el/secondo]}
+                   ^String last-name]]))
+
+  (hodur-spec/defspecs meta-db)
+  ;; => [:my-app.core.person/last-name
+  ;;     :my-app.core.person/first-name
+  ;;     :my-app.core/person
+  ;;     :la/persona
+  ;;     :a-persons/first-name
+  ;;     :el/primo
+  ;;     :el/secondo]
+
+  (s/valid? :la/persona {:first-name "Jane"
+                         :last-name "Janet"}) ;; => true
+
+  (s/valid? :el/secondo "Janet") ;; => true
+#+END_SRC
 
 * Primitive Types
 
-TBD
+  All Hodur primitive types have natural specs as described below:
+
+| Hodur Type | Equivalent Spec |
+|------------+-----------------|
+| ~String~   | ~string?~       |
+| ~ID~       | ~string?~       |
+| ~Integer~  | ~integer?~      |
+| ~Boolean~  | ~boolean?~      |
+| ~Float~    | ~float?~        |
+| ~DateTime~ | ~inst?~         |
+
+  Other specs can be specified by using the ~:spec/override~ or
+  ~:spec/extend~ features described in more detail in the respective
+  section below.
 
 * Cardinality
 
-TBD
+  Multiple cardinalities are dealt with as expected. The following
+  table shows some examples:
+
+| Hodur Cardinality      | Equivalent Spec                              |
+|------------------------+----------------------------------------------|
+| ~nil~ (none specified) | a single ~<spec>~                            |
+| ~[0 n]~                | ~s/coll-of <spec> :min-count 0~              |
+| ~[4 n]~                | ~s/coll-of <spec> :min-count 4~              |
+| ~3~                    | ~s/coll-of <spec> :count 3~                  |
+| ~[5 9]~                | ~s/coll-of <spec> :min-count 5 :max-count 9~ |
+| ~[n 7]~                | ~s/coll-of <spec> :max-count 7~              |
 
 * Enums and Unions
 
-TBD
+  Hodur Enums are spec'd as exact strings. Therefore the hodur model below:
+
+#+BEGIN_SRC clojure
+  '[^:enum
+    Gender
+    [FEMALE MALE]]
+#+END_SRC
+
+  Will create two specs along the lines of ~:app.core.gender/female~
+  where ~#(= "FEMALE" %)~ (one for female and one for male).
+
+  If you need a different behavior, you can use ~:spec/override~
+  described in the section below.
 
 * Overriding and Extending
 
-TBD
+  Specs can get very elaborate and Hodur models do not capture - nor
+  even try to capture - all the possibilities. Instead there are two
+  concepts in place: you can either override the spec that Hodur would
+  use or extend it.
+
+  Overriding is as simple as providing a marker ~:spec/override~ that
+  points to the function you want to use:
+
+#+BEGIN_SRC clojure
+  '[MyEntity
+    [{:spec/override keyword?}
+     a-keyword-field]]
+#+END_SRC
+
+  In the example above the spec for ~a-keyword-field~ will be simply
+  ~keyword?~. You can also specify your own validation
+  functions. Simply make them fully qualified and make sure they have
+  been required in the correct context:
+
+#+BEGIN_SRC clojure
+  '[User
+    [{:spec/override my-app.user/email?}
+     email]]
+#+END_SRC
+
+  Then, just make sure you have something along these lines for your
+  email validation (or any other in fact):
+
+#+BEGIN_SRC clojure
+  (ns my-app.user
+    (:require [clojure.test.check.generators :as gen]))
+
+  (defn email? [s]
+    (let [email-regex #"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}$"]
+      (re-matches email-regex s)))
+#+END_SRC
+
+  Sometimes you are happy with the default spec used by Hodur but want
+  to extend it a bit. For instance, in the email example above you
+  might want to still make it a ~string?~ but also an email. By using
+  the marker ~:spec/extend~ you can automatically wrap the basic spec
+  with an ~s/and~:
+
+#+BEGIN_SRC clojure
+  '[User
+    [{:type String
+      :spec/extend my-app.user/email?}
+     email]]
+#+END_SRC
+
+  The resulting spec will be a ~string?~ ~s/and~ a
+  ~my-app.validations/email?~.
 
 * Custom Generators
 
-TBD
+  Custom generators can be provided with the marker
+  ~:spec/gen~. Example:
+
+#+BEGIN_SRC clojure
+  '[User
+    [{:type String
+      :spec/extend my-app.user/email?
+      :spec/gen my-app.user/gen-email}
+     email]]
+#+END_SRC
+
+
+#+BEGIN_SRC clojure
+  (ns my-app.user
+    (:require [clojure.test.check.generators :as gen]))
+
+  (defn email? [s]
+    (let [email-regex #"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}$"]
+      (re-matches email-regex s)))
+
+  (defn email-gen []
+    (gen/elements #{"asd@qwe.com" "qwe@asd.com" "foo@bar.edu" "bar@edu.br"}))
+#+END_SRC
+
+* Parameters and Parameter Groups' Specs
+
+  Hodur parameters are each individually spec'd so that you are able
+  to run validations against specific entries in your functions.
+
+  In some situations though, it is also possible to want to validate
+  the whole set of parameters as a group. This is particularly useful
+  if your parameters are set as a kind of argument map.
+
+  Hodur's spec plugin will always create a spec for the parameter
+  group as a map such as in the following example where the spec
+  ~:app.core.user/avatar-url%~ is created to include required entries
+  ~:max-width~ and ~:max-height~:
+
+#+BEGIN_SRC clojure
+  '[User
+    [^String email
+     ^String avatar-url [^Integer max-width
+                         ^Integer max-height]]]
+#+END_SRC
+
+  Special attention must be given to the naming convention here. A ~%~
+  is added as a postfix to the name of the field the parameters
+  refer. In the above example, ~:app.core.user/avatar-url~ is the spec
+  to the ~avatar-url~ field (which happens to be a String - or
+  ~string?~) and ~:app.core.user/avatar-url%~ that refers to the
+  parameter group.
+
+  You can also choose a different postfix when calling the ~defspecs~
+  macro if ~%~ doesn't work for you. In the following example, instead
+  of ~%~, ~-params~ will be used.
+
+#+BEGIN_SRC clojure
+  (defspecs meta-db {:params-postfix "-params"})
+#+END_SRC
 
 * Bugs
 
