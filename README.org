@@ -374,6 +374,8 @@ it.
      email]]
 #+END_SRC
 
+  Then the hypothetical code below could validate and genarate out of
+  a set of possible emails:
 
 #+BEGIN_SRC clojure
   (ns my-app.user
@@ -385,6 +387,22 @@ it.
 
   (defn email-gen []
     (gen/elements #{"asd@qwe.com" "qwe@asd.com" "foo@bar.edu" "bar@edu.br"}))
+#+END_SRC
+
+  Once you have these in place, you can easily generate users like:
+
+#+BEGIN_SRC clojure
+  (require '[clojure.spec.gen.alpha :as gen])
+  (require '[clojure.spec.alpha :as s])
+
+  (gen/sample (s/gen :app/user))
+  ;; => [{:email "qwe@asd.com"}
+  ;;     {:email "foo@bar.edu"}
+  ;;     {:email "qwe@asd.com"}
+  ;;     {:email "asd@qwe.com"}
+  ;;     {:email "bar@edu.br"}]
+
+  (s/valid? :app/user (gen/generate (s/gen :app/user))) ;; => true
 #+END_SRC
 
 * Parameters and Parameter Groups' Specs
