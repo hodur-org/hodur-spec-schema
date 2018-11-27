@@ -35,32 +35,28 @@
       :default
       (:node/type obj))))
 
-(defn ^:private default-prefix []
-  (str (ns-name *ns*)))
-
 (defn ^:private get-spec-entity-name
   [type-name
-   {:keys [prefix] :or {prefix (default-prefix)}}]
+   {:keys [prefix]}]
   (keyword (name prefix)
            (->kebab-case-string type-name)))
 
 (defn ^:private get-spec-field-name
   [type-name field-name
-   {:keys [prefix] :or {prefix (default-prefix)}}]
+   {:keys [prefix]}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (->kebab-case-string field-name)))
 
 (defn ^:private get-spec-param-name
   [type-name field-name param-name
-   {:keys [prefix] :or {prefix (default-prefix)}}]
+   {:keys [prefix]}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name) "."
                 (->kebab-case-string field-name))
            (->kebab-case-string param-name)))
 
 (defn ^:private get-spec-param-group-name
   [type-name field-name
-   {:keys [prefix params-postfix] :or {prefix (default-prefix)
-                                       params-postfix "%"} :as opts}]
+   {:keys [prefix params-postfix] :or {params-postfix "%"} :as opts}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
            (str (->kebab-case-string field-name) params-postfix)))
 
@@ -364,6 +360,12 @@
                          (println " ")) 
                    `(s/def ~k ~v)))))))
 
+(defn ^:private eval-default-prefix []
+  (eval '(str (ns-name *ns*))))
+
+(defn ^:private default-prefix []
+  (str (ns-name *ns*)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Public functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -371,16 +373,19 @@
 (defn schema
   ([conn]
    (schema conn nil))
-  ([conn opts]
-   (let [all-ids (get-topo-ids conn)]
-     (compile-all conn all-ids opts))))
+  ([conn {:keys [prefix] :as opts}]
+   (let [opts' (if-not prefix (assoc opts :prefix (default-prefix)) opts)
+         all-ids (get-topo-ids conn)]
+     (compile-all conn all-ids opts'))))
 
 (defmacro defspecs
   ([conn]
    `(defspecs ~conn nil))
-  ([conn opts]
-   (mapv (fn [form] form)
-         (schema (eval conn) (eval opts)))))
+  ([conn {:keys [prefix] :as opts}]
+   (let [opts# (if-not prefix (assoc opts :prefix (eval-default-prefix)) (eval opts))
+         conn# (eval conn)]
+     (mapv (fn [form] form)
+           (schema conn# opts#)))))
 
 
 
