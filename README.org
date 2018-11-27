@@ -3,7 +3,7 @@
 #+EMAIL:   info@tiagoluchini.eu
 #+OPTIONS: toc:t
 
-[[https://circleci.com/gh/luchiniatwork/hodur-spec-schema.svg?style=shield&circle-token=86a1a26155a45d7ec4aba873e975b15ce37d1f5a]]
+[[https://circleci.com/gh/luchiniatwork/hodur-spec-schema.svg?style=shield&circle-token=4efa55e1e836d3613c886708b4246b488090b263]]
 [[https://img.shields.io/clojars/v/hodur/engine.svg]]
 [[https://img.shields.io/clojars/v/hodur/spec-schema.svg]]
 [[https://img.shields.io/badge/license-MIT-blue.svg]]
@@ -127,7 +127,6 @@ it.
 
   All Hodur plugins follow the [[https://github.com/luchiniatwork/hodur-engine#model-definition][Model Definition]] as described on Hodur
   [[https://github.com/luchiniatwork/hodur-engine#model-definition][Engine's documentation]].
-
 
 * Naming Conventions
 
@@ -262,9 +261,32 @@ it.
 | ~[5 9]~                | ~s/coll-of <spec> :min-count 5 :max-count 9~ |
 | ~[n 7]~                | ~s/coll-of <spec> :max-count 7~              |
 
+* Interfaces
+
+  Hodur interfaces are supported. The approach taken is that the
+  resulting spec for the child entity is an `s/and` of itself and all
+  of its interfaces.
+
+  Take the following example:
+
+#+BEGIN_SRC clojure
+  '[^:interface
+    Animal
+    [^String race]
+
+    ^{:implements Animal}
+    Person
+    [^String first-name
+     ^String last-name]]
+#+END_SRC
+
+  The resulting high level specs would be ~:app/animal~ and
+  ~:app/person~ where ~:app/person~ needs to validate the keys in the
+  ~Person~ entity and also the keys on ~Animal~.
+
 * Enums and Unions
 
-  Hodur Enums are spec'd as exact strings. Therefore the hodur model below:
+  Hodur enums are spec'd as exact strings. Therefore the hodur model below:
 
 #+BEGIN_SRC clojure
   '[^:enum
@@ -272,11 +294,17 @@ it.
     [FEMALE MALE]]
 #+END_SRC
 
-  Will create two specs along the lines of ~:app.core.gender/female~
-  where ~#(= "FEMALE" %)~ (one for female and one for male).
+  Will create two specs where one of them would be along the lines of
+  ~:app.core.gender/female~ where ~#(= "FEMALE" %)~ (one for female
+  and one for male).
+
+  The enum per se is an ~s/or~ between all of the enum's options.
 
   If you need a different behavior, you can use ~:spec/override~
   described in the section below.
+
+  Hodur unions work similarly but the ~s/or~ is between the entities
+  the union refers to.
 
 * Overriding and Extending
 
