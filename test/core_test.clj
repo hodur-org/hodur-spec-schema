@@ -211,17 +211,17 @@
 
   (is (not (s/valid? :core-test.cardinality-entity/distinct-integers-in-a-list [1 2 3]))))
 
-(deftest aliases-should-work
-  (hodur-spec/defspecs meta-db-aliases)
+(hodur-spec/defspecs meta-db-aliases)
 
+(deftest aliases-should-work
   (is (s/valid? :my-param/alias "foo"))
   (is (s/valid? :my-field/alias1 "bar"))
   (is (s/valid? :my-field/alias2 "foo"))
   (is (s/valid? :my-entity/alias {:an-aliased-field "bar"})))
 
-(deftest extends-and-overrides-should-work
-  (hodur-spec/defspecs meta-db-extend-override)
+(hodur-spec/defspecs meta-db-extend-override)
 
+(deftest extends-and-overrides-should-work
   (is (s/valid? :core-test.extend-override-entity/keyword-field :foo))
 
   (is (not (s/valid? :core-test.extend-override-entity/keyword-field "foo")))
@@ -230,12 +230,9 @@
 
   (is (not (s/valid? :core-test.extend-override-entity/email-field "foobar"))))
 
+(hodur-spec/defspecs meta-db-extend-override {:prefix :app})
+
 (deftest custom-generators-should-work
-  (hodur-spec/defspecs meta-db-extend-override {:prefix :app})
-
-  (doseq [animal (gen/sample (s/gen :app/animal))]
-    (is (s/valid? :app/animal animal)))
-
   (doseq [k (gen/sample (s/gen :app.extend-override-entity/keyword-field))]
     (is (keyword? k))
     (is (s/valid? :app.extend-override-entity/keyword-field k)))
