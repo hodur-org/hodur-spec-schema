@@ -61,9 +61,13 @@
 
 (defn ^:private get-spec-param-group-name
   [type-name field-name
-   {:keys [prefix params-postfix] :or {params-postfix "%"} :as opts}]
+   {:keys [prefix params-postfix group-type] :or {params-postfix "%"} :as opts}]
   (keyword (str (name prefix) "." (->kebab-case-string type-name))
-           (str (->kebab-case-string field-name) params-postfix)))
+           (str (->kebab-case-string field-name)
+                (case group-type
+                  :map ""
+                  :tuple "-ordered")
+                params-postfix)))
 
 (defmethod get-spec-name :type
   [{:keys [type/kebab-case-name]} opts]
@@ -243,7 +247,7 @@
       form)))
 
 (defmethod get-spec-form* :param-group
-  [params opts]
+  [params {:keys [group-type] :as opts}]
   (let [filter-fn (fn [pred c]
                     (->> c
                          (filter pred)
@@ -251,7 +255,9 @@
                          vec))
         req (filter-fn #(not (:param/optional %)) params)
         opt (filter-fn #(:param/optional %) params)]
-    `(s/keys :req-un ~req :opt-un ~opt)))
+    (case group-type
+      :map `(s/keys :req-un ~req :opt-un ~opt)
+      :tuple (list* 's/tuple (map #(get-spec-name % opts) params)))))
 
 (defmethod get-spec-form* "String" [_ _] `string?)
 
@@ -313,6 +319,7 @@
 (defn ^:private build-aliases-spec [conn opts]
   (let [eids (-> (q/q '[:find ?e
                         :where
+                        [?e :spec/tag true]
                         (or [?e :spec/alias]
                             [?e :spec/aliases])]
                       @conn)
@@ -326,17 +333,19 @@
                              aliases''))))
             [] objs)))
 
-(defn ^:private build-param-group-specs [conn opts]
+(defn ^:private build-param-group-specs [conn group-type opts]
   (let [eids (-> (q/q '[:find ?f
                         :where
-                        [_ :param/parent ?f]]
+                        [_ :param/parent ?f]
+                        [?f :spec/tag true]]
                       @conn)
                  vec flatten)
-        objs (d/pull-many @conn '[{:param/_parent [*]}] eids)]
+        objs (d/pull-many @conn '[{:param/_parent [:db/id :node/type]}] eids)]
     (reduce (fn [c {:keys [param/_parent] :as field}]
-              (let [nodes (map #(pull-node conn %) _parent)]
-                (conj c (hash-map (get-spec-name nodes opts)
-                                  (get-spec-form nodes opts)))))
+              (let [nodes (map #(pull-node conn %) _parent)
+                    opts' (assoc opts :group-type group-type)]
+                (conj c (hash-map (get-spec-name nodes opts')
+                                  (get-spec-form nodes opts')))))
             [] objs)))
 
 (defn ^:private build-dummy-types-specs [conn opts]
@@ -360,18 +369,20 @@
 
 (defn ^:private compile-all
   [conn opts]
-  (let [dummy-types-specs  (build-dummy-types-specs conn opts)
-        params-specs       (build-by-type-specs conn :param opts)
-        field-specs        (build-by-type-specs conn :field opts)
-        type-specs         (build-by-type-specs conn :type opts)
-        aliases-specs      (build-aliases-spec conn opts)
-        param-groups-specs (build-param-group-specs conn opts)]
+  (let [dummy-types-specs          (build-dummy-types-specs conn opts)
+        params-specs               (build-by-type-specs conn :param opts)
+        field-specs                (build-by-type-specs conn :field opts)
+        type-specs                 (build-by-type-specs conn :type opts)
+        aliases-specs              (build-aliases-spec conn opts)
+        param-groups-specs         (build-param-group-specs conn :map opts)
+        param-groups-ordered-specs (build-param-group-specs conn :tuple opts)]
     (->> (concat dummy-types-specs
                  params-specs
                  field-specs
                  type-specs
                  aliases-specs
-                 param-groups-specs)
+                 param-groups-specs
+                 param-groups-ordered-specs)
          (mapv (fn [entry]
                  (let [k (first (keys entry))
                        v (first (vals entry))]
@@ -495,3 +506,8 @@
   (gen/generate (s/gen :my-app/extend-override-entity))
   
   )
+
+
+(s/def :a/tuple (s/tuple string? int? boolean?))
+
+(s/valid? :a/tuple ["qwe" 1 true])

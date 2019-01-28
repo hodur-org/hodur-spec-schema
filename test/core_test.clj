@@ -150,10 +150,10 @@
         res-prefix (hodur-spec/defspecs meta-db-basic {:prefix :app})]
     (is (= (count res-no-prefix)
            (count res-prefix)))
-    (is (= 36 (count res-prefix)))
-    (is (= 35 (count (filter #(string/starts-with? (namespace %) "core-test")
+    (is (= 38 (count res-prefix)))
+    (is (= 37 (count (filter #(string/starts-with? (namespace %) "core-test")
                              res-no-prefix))))
-    (is (= 35 (count (filter #(string/starts-with? (namespace %) "app")
+    (is (= 37 (count (filter #(string/starts-with? (namespace %) "app")
                              res-prefix))))
 
     (is (s/valid? :core-test/animal {:race "Human"}))
@@ -182,14 +182,33 @@
                    {:first-name "Tiago"
                     :last-name "Luchini"
                     :gender "MALE"
-                    :height 1.78}]))))
+                    :height 1.78}]))
+
+    (is (s/valid? :core-test.query-root/search%
+                  {:term "my search"}))
+
+    (is (s/valid? :core-test.query-root/search%
+                  {:term "my search"
+                   :limit 4
+                   :offset 5}))
+
+    (is (not (s/valid? :core-test.query-root/search%
+                       {:term 1
+                        :limit ""
+                        :offset nil})))
+
+    (is (s/valid? :core-test.query-root/search-ordered%
+                  ["my search" 1 5]))
+
+    (is (not (s/valid? :core-test.query-root/search-ordered%
+                       ["my search"])))))
 
 (deftest schema-and-macros-should-yield-the-same
   (let [res-macro (hodur-spec/defspecs meta-db-basic)
         res-schema (hodur-spec/schema meta-db-basic)]
     (is (= (count res-macro)
            (count res-schema)))
-    (is (= 36 (count res-schema)))))
+    (is (= 38 (count res-schema)))))
 
 (deftest cardinalities-should-work
   (hodur-spec/defspecs meta-db-cardinality)

@@ -410,14 +410,25 @@ it.
   Hodur parameters are each individually spec'd so that you are able
   to run validations against specific entries in your functions.
 
-  In some situations though, it is also possible to want to validate
-  the whole set of parameters as a group. This is particularly useful
-  if your parameters are set as a kind of argument map.
+  In some situations though, it is also possible that you want to
+  validate the whole set of parameters as a group. This is
+  particularly useful if your parameters are set as a kind of argument
+  map or ordered tuple/vector.
 
-  Hodur's spec plugin will always create a spec for the parameter
-  group as a map such as in the following example where the spec
-  ~:app.core.user/avatar-url%~ is created to include required entries
-  ~:max-width~ and ~:max-height~:
+  Hodur's spec plugin will always create two specs for the parameter
+  group, one as a map and one as a tuple. What this means in practice
+  is that in the following example the specs
+  ~:app.core.user/avatar-url%~ and
+  ~:app.core.user/avatar-url-ordered%~ are created.
+
+  ~:app.core.user/avatar-url%~ will represent a map that will include
+  the required entries ~:max-width~ and ~:max-height~.
+
+  ~:app.core.user/avatar-url-ordered%~ will represent a tuple of two
+  integers (the first representing ~:max-width~ and the second
+  representing ~:max-height~. As you can see, in this spec entry the
+  names of the parameters get lost. Another feature to notice is that
+  optional parameters are not supported in such case.
 
 #+BEGIN_SRC clojure
   '[User
@@ -428,14 +439,17 @@ it.
 
   Special attention must be given to the naming convention here. A ~%~
   is added as a postfix to the name of the field the parameters
-  refer. In the above example, ~:app.core.user/avatar-url~ is the spec
-  to the ~avatar-url~ field (which happens to be a String - or
-  ~string?~) and ~:app.core.user/avatar-url%~ that refers to the
-  parameter group.
+  refer. For the ordered spec, a ~-ordered%~ is added. In the above
+  example, ~:app.core.user/avatar-url~ is the spec to the ~avatar-url~
+  field (which happens to be a String - or ~string?~),
+  ~:app.core.user/avatar-url%~ refers to the parameter group as a map,
+  and ~:app.core.user/avatar-url-ordered%~ refers to the parameter
+  group as a tuple..
 
   You can also choose a different postfix when calling the ~defspecs~
   macro if ~%~ doesn't work for you. In the following example, instead
-  of ~%~, ~-params~ will be used.
+  of ~%~, ~-params~ will be used (for ordered specs, this will mean
+  ~-ordered-params~ will be used).
 
 #+BEGIN_SRC clojure
   (defspecs meta-db {:params-postfix "-params"})
