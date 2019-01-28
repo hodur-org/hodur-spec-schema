@@ -7,7 +7,7 @@
             [hodur-spec-schema.core :as hodur-spec]
             [test-fns]))
 
-(def ^:private basic-schema
+(def basic-schema
   '[^{:spec/tag true}
     default
 
@@ -55,7 +55,19 @@
         :optional true}
       offset]]])
 
-(def ^:private cardinality-schema
+(def circular-schema
+  '[^{:spec/tag true}
+    default
+
+    Person
+    [^String name
+     ^{:type Person
+       :optional true} parent
+     ^{:type Boolean
+       :optional true} is-related
+     [^Person other-person]]])
+
+(def cardinality-schema
   '[^{:spec/tag true}
     default
 
@@ -93,7 +105,7 @@
        :spec/kind list?}
      distinct-integers-in-a-list]])
 
-(def ^:private aliases-schema
+(def aliases-schema
   '[^{:spec/tag true}
     default
 
@@ -107,7 +119,7 @@
         :spec/alias :my-param/alias}
       an-aliased-param]]])
 
-(def ^:private extend-override-schema
+(def extend-override-schema
   '[^{:spec/tag true}
     default
 
@@ -125,6 +137,8 @@
 
 (def meta-db-basic (engine/init-schema basic-schema))
 
+(def meta-db-circular (engine/init-schema circular-schema))
+
 (def meta-db-cardinality (engine/init-schema cardinality-schema))
 
 (def meta-db-aliases (engine/init-schema aliases-schema))
@@ -136,10 +150,10 @@
         res-prefix (hodur-spec/defspecs meta-db-basic {:prefix :app})]
     (is (= (count res-no-prefix)
            (count res-prefix)))
-    (is (= 29 (count res-prefix)))
-    (is (= 28 (count (filter #(string/starts-with? (namespace %) "core-test")
+    (is (= 36 (count res-prefix)))
+    (is (= 35 (count (filter #(string/starts-with? (namespace %) "core-test")
                              res-no-prefix))))
-    (is (= 28 (count (filter #(string/starts-with? (namespace %) "app")
+    (is (= 35 (count (filter #(string/starts-with? (namespace %) "app")
                              res-prefix))))
 
     (is (s/valid? :core-test/animal {:race "Human"}))
@@ -175,7 +189,7 @@
         res-schema (hodur-spec/schema meta-db-basic)]
     (is (= (count res-macro)
            (count res-schema)))
-    (is (= 29 (count res-schema)))))
+    (is (= 36 (count res-schema)))))
 
 (deftest cardinalities-should-work
   (hodur-spec/defspecs meta-db-cardinality)
@@ -243,3 +257,11 @@
 
   (doseq [entity (gen/sample (s/gen :app/extend-override-entity))]
     (is (s/valid? :app/extend-override-entity entity))))
+
+(hodur-spec/defspecs meta-db-circular {:prefix :circular})
+
+(deftest circular-reference-should-work
+  (is (s/valid? :circular/person {:name "Foo"
+                                  :parent {:name "Bar"}}))
+  (is (s/valid? :circular.person/is-related% {:other-person {:name "Foo"}}))
+  (is (s/valid? :circular.person/is-related true)))

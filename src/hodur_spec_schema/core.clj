@@ -2,18 +2,23 @@
   (:require [clojure.spec.alpha :as s]
             [datascript.core :as d]
             [datascript.query-v3 :as q]
-            [camel-snake-kebab.core :refer [->kebab-case-string]]
-            [hodur-engine.utils :as hodur-utils]))
+            [camel-snake-kebab.core :refer [->kebab-case-string]]))
 
-(defn ^:private get-topo-ids [conn]
-  (hodur-utils/topological-sort conn
-                                {:direction {:type->field-children :rtl
-                                             :field->param-children :rtl
-                                             :type->field-return :ltr
-                                             :type->param-return :ltr
-                                             :interface->type :ltr
-                                             :union->type :ltr}
-                                 :tag :spec/tag}))
+(defn ^:private get-ids-by-node-type [conn node-type]
+  (case node-type
+    :type (d/q '[:find [?e ...]
+                 :in $ ?node-type
+                 :where
+                 [?e :node/type ?node-type]
+                 [?e :spec/tag true]
+                 [?e :type/nature :user]]
+               @conn node-type)
+    (d/q '[:find [?e ...]
+           :in $ ?node-type
+           :where
+           [?e :node/type ?node-type]
+           [?e :spec/tag true]]
+         @conn node-type)))
 
 (defn ^:private prepend-core-ns [sym]
   (when (not (nil? sym))
@@ -334,24 +339,39 @@
                                   (get-spec-form nodes opts)))))
             [] objs)))
 
+(defn ^:private build-dummy-types-specs [conn opts]
+  (let [eids (get-ids-by-node-type conn :type)
+        objs (d/pull-many @conn '[*] eids)]
+    (reduce (fn [c obj]
+              (conj c (hash-map (get-spec-name obj opts)
+                                'any?)))
+            [] objs)))
+
 (defn ^:private build-node-spec [conn node opts]
   (-> conn
       (pull-node node)
       (#(hash-map (get-spec-name % opts)
                   (get-spec-form % opts)))))
 
+(defn ^:private build-by-type-specs [conn node-type opts]
+  (let [eids (get-ids-by-node-type conn node-type)
+        nodes (d/pull-many @conn [:db/id :node/type] eids)]
+    (map #(build-node-spec conn % opts) nodes)))
+
 (defn ^:private compile-all
-  [conn ids opts]
-  (let [aliases-specs      (build-aliases-spec conn opts)
+  [conn opts]
+  (let [dummy-types-specs  (build-dummy-types-specs conn opts)
+        params-specs       (build-by-type-specs conn :param opts)
+        field-specs        (build-by-type-specs conn :field opts)
+        type-specs         (build-by-type-specs conn :type opts)
+        aliases-specs      (build-aliases-spec conn opts)
         param-groups-specs (build-param-group-specs conn opts)]
-    (->> ids
-         (d/pull-many @conn [:db/id :node/type])
-         (reduce
-          (fn [c node]
-            (conj c (build-node-spec conn node opts)))
-          [])
-         (#(into % aliases-specs))
-         (#(into % param-groups-specs))
+    (->> (concat dummy-types-specs
+                 params-specs
+                 field-specs
+                 type-specs
+                 aliases-specs
+                 param-groups-specs)
          (mapv (fn [entry]
                  (let [k (first (keys entry))
                        v (first (vals entry))]
@@ -374,9 +394,8 @@
   ([conn]
    (schema conn nil))
   ([conn {:keys [prefix] :as opts}]
-   (let [opts' (if-not prefix (assoc opts :prefix (default-prefix)) opts)
-         all-ids (get-topo-ids conn)]
-     (compile-all conn all-ids opts'))))
+   (let [opts' (if-not prefix (assoc opts :prefix (default-prefix)) opts)]
+     (compile-all conn opts'))))
 
 (defmacro defspecs
   ([conn]
@@ -396,18 +415,21 @@
   (require '[clojure.spec.gen.alpha :as gen])
   (require '[hodur-engine.core :as engine])
   (require 'test-fns)
+  (use 'core-test)
 
 
   )
 
 (comment
   (def meta-db (engine/init-schema basic-schema
-                                   cardinality-schema
-                                   aliases-schema
-                                   extend-override-schema))
+                                   #_cardinality-schema
+                                   #_aliases-schema
+                                   #_extend-override-schema))
 
   (let [s (schema meta-db {:prefix :my-app})]
-    (clojure.pprint/pprint s)))
+    #_(clojure.pprint/pprint s))
+
+  )
 
 
 (comment
