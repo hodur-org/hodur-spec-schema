@@ -426,9 +426,10 @@ it.
 
   ~:app.core.user/avatar-url-ordered%~ will represent a tuple of two
   integers (the first representing ~:max-width~ and the second
-  representing ~:max-height~. As you can see, in this spec entry the
+  representing ~:max-height~). As you can see, in this spec entry the
   names of the parameters get lost. Another feature to notice is that
-  optional parameters are not supported in such case.
+  optional parameters are not supported in such case. This is as per
+  tuple spec.
 
 #+BEGIN_SRC clojure
   '[User
