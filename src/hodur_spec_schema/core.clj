@@ -506,8 +506,3 @@
   (gen/generate (s/gen :my-app/extend-override-entity))
   
   )
-
-
-(s/def :a/tuple (s/tuple string? int? boolean?))
-
-(s/valid? :a/tuple ["qwe" 1 true])
