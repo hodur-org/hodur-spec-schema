@@ -102,7 +102,7 @@ it.
   ~defspecs~ that already defines all your specs onto your registry:
 
 #+BEGIN_SRC clojure
-  (hodur-specs/defspecs meta-db)
+  (hodur-spec/defspecs meta-db)
 #+END_SRC
 
   Once ~defspecs~ is run, you'll have three specs to use:
