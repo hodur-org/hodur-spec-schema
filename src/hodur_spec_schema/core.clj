@@ -257,7 +257,7 @@
         opt (filter-fn #(:param/optional %) params)]
     (case group-type
       :map `(s/keys :req-un ~req :opt-un ~opt)
-      :tuple (list* 's/tuple (map #(get-spec-name % opts) params)))))
+      :tuple (list* `s/tuple (map #(get-spec-name % opts) params)))))
 
 (defmethod get-spec-form* "String" [_ _] `string?)
 
