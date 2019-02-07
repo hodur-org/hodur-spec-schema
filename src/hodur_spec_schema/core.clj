@@ -128,6 +128,12 @@
 (defmulti ^:private get-spec-form*
   (fn [obj opts]
     (cond
+      (:field/optional obj)
+      :optional-field
+
+      (:param/optional obj)
+      :optional-param
+
       (many-cardinality? obj)
       :many-ref
       
@@ -228,6 +234,16 @@
 (defmethod get-spec-form* :union-field
   [{:keys [field/union-type]} opts]
   (get-spec-name union-type opts))
+
+(defmethod get-spec-form* :optional-param
+  [obj opts]
+  (let [entity-spec (get-spec-form (dissoc obj :param/optional) opts)]
+    (list* `s/nilable [entity-spec])))
+
+(defmethod get-spec-form* :optional-field
+  [obj opts]
+  (let [entity-spec (get-spec-form (dissoc obj :field/optional) opts)]
+    (list* `s/nilable [entity-spec])))
 
 (defmethod get-spec-form* :entity
   [{:keys [field/_parent type/implements]} opts]

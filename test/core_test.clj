@@ -83,6 +83,10 @@
     [^{:type String
        :cardinality [0 n]}
      many-strings
+     ^{:type String
+       :optional true
+       :cardinality [0 n]}
+     many-strings-optional
      ^{:type GenderTwo
        :cardinality [0 n]}
      many-genders
@@ -171,6 +175,7 @@
                                      :height 1.78}))
 
     (is (not (s/valid? :core-test/person {:firs-name "Tiago"
+                                          :middle-name nil
                                           :last-name "Luchini"
                                           :gender "MALE"
                                           :height 1.78})))
@@ -216,6 +221,10 @@
   (is (s/valid? :core-test.cardinality-entity/many-strings []))
 
   (is (s/valid? :core-test.cardinality-entity/many-strings ["foo" "bar"]))
+
+  (is (s/valid? :core-test.cardinality-entity/many-strings-optional nil))
+  (is (s/valid? :core-test.cardinality-entity/many-strings-optional []))
+  (is (s/valid? :core-test.cardinality-entity/many-strings-optional ["foo" "bar"]))
 
   (is (s/valid? :core-test.cardinality-entity/many-genders ["MALE" "UNKOWN"]))
 
