@@ -286,7 +286,8 @@ it.
 
 * Enums and Unions
 
-  Hodur enums are spec'd as exact strings. Therefore the hodur model below:
+  Hodur enums are spec'd as exact keywords or strings. Therefore the hodur
+  model below:
 
 #+BEGIN_SRC clojure
   '[^:enum
@@ -295,7 +296,7 @@ it.
 #+END_SRC
 
   Will create two specs where one of them would be along the lines of
-  ~:app.core.gender/female~ where ~#(= "FEMALE" %)~ (one for female
+  ~:app.core.gender/female~ where ~#(= "FEMALE" (name %))~ (one for female
   and one for male).
 
   The enum per se is an ~s/or~ between all of the enum's options.

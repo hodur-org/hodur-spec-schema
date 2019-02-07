@@ -229,7 +229,7 @@
 
 (defmethod get-spec-form* :enum-entry
   [{:keys [field/name]} _]
-  `#(= ~name %))
+  `#(= ~name (name %)))
 
 (defmethod get-spec-form* :union-field
   [{:keys [field/union-type]} opts]

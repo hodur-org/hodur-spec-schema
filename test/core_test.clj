@@ -166,6 +166,7 @@
     (is (s/valid? :core-test/animal {:race "Human"}))
 
     (is (s/valid? :core-test.person.height/unit "METERS"))
+    (is (s/valid? :core-test.person.height/unit :METERS))
 
     (is (s/valid? :core-test/pet {:name "bla" :dob #inst "2000-10-10" :race "cat"}))
 
