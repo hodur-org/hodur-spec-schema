@@ -174,6 +174,19 @@
                                      :last-name "Luchini"
                                      :gender "MALE"
                                      :height 1.78}))
+    (is (s/valid? :core-test/person {:first-name "Tiago"
+                                     :last-name "Luchini"
+                                     :gender :MALE
+                                     :height 1.78}))
+
+    (is (not (s/valid? :core-test/person {:first-name "Tiago"
+                                          :last-name "Luchini"
+                                          :gender nil
+                                          :height 1.78})))
+    (is (not (s/valid? :core-test/person {:first-name "Tiago"
+                                          :last-name "Luchini"
+                                          :gender 1
+                                          :height 1.78})))
 
     (is (not (s/valid? :core-test/person {:firs-name "Tiago"
                                           :middle-name nil
