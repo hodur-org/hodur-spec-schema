@@ -307,3 +307,21 @@
                                   :parent {:name "Bar"}}))
   (is (s/valid? :circular.person/is-related% {:other-person {:name "Foo"}}))
   (is (s/valid? :circular.person/is-related true)))
+
+(def disable-field-schema
+  '[^{:spec/tag true}
+    default
+
+    Entity
+    [^{:type String}
+     available-field
+     ^{:type String
+       :spec/tag false}
+     not-available-field]])
+
+(def meta-db-disable-field (engine/init-schema disable-field-schema))
+
+(hodur-spec/defspecs meta-db-disable-field {:prefix :disable-field})
+
+(deftest disable-field-should-work
+  (is (s/valid? :disable-field/entity {:available-field ""})))

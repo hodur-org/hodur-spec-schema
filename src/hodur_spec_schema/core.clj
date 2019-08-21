@@ -251,6 +251,7 @@
   [{:keys [field/_parent type/implements]} opts]
   (let [filter-fn (fn [pred c]
                     (->> c
+                         (filter :spec/tag)
                          (filter pred)
                          (map #(get-spec-name % opts))
                          vec))
